@@ -1,6 +1,13 @@
 # HANDOFF — WalkNApp
 
 ## 現在地
+- v0.7: Phase 2 (Universal Asset Platform) 対応のデータモデル移行
+  - item_instance を asset テーブルに置換。主キーを UUID 化、Room version 2
+  - AssetStatus(INTERNAL/PENDING_MINT/MINTED/EXPORTED)、owner_ref/chain_ref/metadata_uri を予約列として追加
+  - Collections(walkn.basic / walkn.treasure)、MintPolicy(NEVER/ON_DEMAND/AUTO)、capabilities を ItemDefinition に付与
+  - AssetMetadata: Metaplex 準拠 JSON 出力。持ち物画面から共有でエクスポート可能
+  - asset_event テーブルで ACQUIRE を記録（Phase 2 の AI Engine 入力）
+  - 詳細は PHASE2_READINESS.md
 - v0.6: 取得判定＋Room保存（開発ステップ4完了）
   - Room 2.6.1 + KSP 導入。item_instance / acquired_spawn テーブル
   - 30m以内のマーカータップで取得 → DB保存＋マーカー消滅。範囲外は距離をトースト表示

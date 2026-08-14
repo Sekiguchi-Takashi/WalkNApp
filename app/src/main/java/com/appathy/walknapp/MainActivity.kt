@@ -42,9 +42,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import android.content.Intent
 import com.appathy.walknapp.data.AcquiredSpawnEntity
-import com.appathy.walknapp.data.ItemInstanceEntity
+import com.appathy.walknapp.data.AssetEntity
+import com.appathy.walknapp.data.AssetEventEntity
+import com.appathy.walknapp.data.AssetMetadata
+import com.appathy.walknapp.data.AssetStatus
 import com.appathy.walknapp.data.WalkDatabase
+import java.util.UUID
 import com.appathy.walknapp.spawn.ItemCatalog
 import com.appathy.walknapp.spawn.SpawnEngine
 import com.appathy.walknapp.spawn.SpawnPoint
@@ -131,7 +136,7 @@ fun MapContent(onOpenInventory: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val db = remember { WalkDatabase.get(context) }
-    val itemCount by db.dao().observeItemCount().collectAsState(initial = 0)
+    val itemCount by db.dao().observeAssetCount().collectAsState(initial = 0)
 
     var spawnCount by remember { mutableStateOf(0) }
     var nearestText by remember { mutableStateOf("現在地を取得中…") }
@@ -194,17 +199,29 @@ fun MapContent(onOpenInventory: () -> Unit) {
                             } else {
                                 scope.launch {
                                     val now = System.currentTimeMillis()
-                                    db.dao().insertItem(
-                                        ItemInstanceEntity(
+                                    val uuid = UUID.randomUUID().toString()
+                                    db.dao().insertAsset(
+                                        AssetEntity(
+                                            uuid = uuid,
                                             itemDefId = sp.itemDef.id,
+                                            collectionId = sp.itemDef.collectionId,
                                             acquiredAt = now,
                                             acquiredLat = here.latitude,
                                             acquiredLng = here.longitude,
-                                            spawnId = sp.id
+                                            spawnId = sp.id,
+                                            status = AssetStatus.INTERNAL.name
                                         )
                                     )
                                     db.dao().insertAcquiredSpawn(
                                         AcquiredSpawnEntity(sp.id, now)
+                                    )
+                                    db.dao().insertEvent(
+                                        AssetEventEntity(
+                                            assetUuid = uuid,
+                                            kind = "ACQUIRE",
+                                            at = now,
+                                            detail = sp.id
+                                        )
                                     )
                                     mapView.overlays.remove(marker)
                                     mapView.invalidate()
@@ -277,8 +294,9 @@ fun MapContent(onOpenInventory: () -> Unit) {
 @Composable
 fun InventoryScreen(onBack: () -> Unit) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val db = remember { WalkDatabase.get(context) }
-    val items by db.dao().observeItems().collectAsState(initial = emptyList())
+    val assets by db.dao().observeAssets().collectAsState(initial = emptyList())
     val fmt = remember { SimpleDateFormat("MM/dd HH:mm", Locale.JAPAN) }
 
     Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
@@ -288,31 +306,47 @@ fun InventoryScreen(onBack: () -> Unit) {
         ) {
             Button(onClick = onBack) { Text("戻る") }
             Text(
-                "  持ち物 ${items.size}個",
+                "  持ち物 ${assets.size}個",
                 fontSize = 18.sp,
                 modifier = Modifier.padding(start = 8.dp)
             )
         }
-        if (items.isEmpty()) {
+        Button(
+            onClick = {
+                scope.launch {
+                    val json = AssetMetadata.exportAll(db.dao().allAssets())
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "application/json"
+                        putExtra(Intent.EXTRA_SUBJECT, "WalkNApp assets")
+                        putExtra(Intent.EXTRA_TEXT, json)
+                    }
+                    context.startActivity(Intent.createChooser(intent, "資産データを書き出す"))
+                }
+            },
+            modifier = Modifier.padding(top = 8.dp)
+        ) { Text("資産データを書き出す (JSON)") }
+
+        if (assets.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("まだ何も拾っていません")
             }
         } else {
             LazyColumn(modifier = Modifier.padding(top = 12.dp)) {
-                items(items) { entity: ItemInstanceEntity ->
-                    val def = ItemCatalog.byId(entity.itemDefId)
+                items(assets) { asset: AssetEntity ->
+                    val def = ItemCatalog.byId(asset.itemDefId)
                     Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
                         Column(modifier = Modifier.padding(12.dp)) {
                             Text(
-                                "${def?.name ?: entity.itemDefId}  [${def?.rarity?.label ?: "-"}]",
+                                "${def?.name ?: asset.itemDefId}  [${def?.rarity?.label ?: "-"}]",
                                 fontSize = 16.sp
                             )
+                            Text("状態: ${asset.status}", fontSize = 12.sp)
                             Text(
-                                "取得: ${fmt.format(Date(entity.acquiredAt))}",
+                                "取得: ${fmt.format(Date(asset.acquiredAt))}",
                                 fontSize = 12.sp
                             )
                             Text(
-                                "地点: ${"%.5f".format(entity.acquiredLat)}, ${"%.5f".format(entity.acquiredLng)}",
+                                "地点: ${"%.5f".format(asset.acquiredLat)}, ${"%.5f".format(asset.acquiredLng)}",
                                 fontSize = 12.sp
                             )
                         }
