@@ -1,12 +1,12 @@
 # HANDOFF — WalkNApp
 
 ## 現在地
-- v0.1: リポジトリ＋Actionsビルド環境（開発ステップ1完了）
-- MainActivity はビルド確認用プレースホルダのみ
+- v0.2: osmdroid 地図表示＋現在地追従（開発ステップ2完了）
+  - 位置情報パーミッション要求 → MAPNIK タイル表示 → MyLocationNewOverlay で現在地追従
+  - 「現在地」ボタンで追従復帰
 
 ## 次のステップ（WALK_APP_SPEC.md §8）
-2. 地図表示＋現在地（osmdroid — 依存は導入済み）
-3. 決定論スポーン＋マーカー表示
+3. 決定論スポーン＋マーカー表示（geohash＋日付シード）
 4. 取得判定＋Inventory/Room 保存
 5. セッション記録
 6. インベントリ/図鑑/履歴画面
