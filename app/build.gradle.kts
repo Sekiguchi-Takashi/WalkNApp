@@ -12,13 +12,26 @@ android {
         applicationId = "com.appathy.walknapp"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2"
+        versionCode = 3
+        versionName = "0.3"
+    }
+
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("walkn-debug.keystore")
+            storePassword = "walknapp"
+            keyAlias = "walkn"
+            keyPassword = "walknapp"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {

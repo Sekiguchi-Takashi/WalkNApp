@@ -1,6 +1,7 @@
 # HANDOFF — WalkNApp
 
 ## 現在地
+- v0.3: 固定 keystore (app/walkn-debug.keystore) で署名統一。以降アンインストール不要で上書き更新可能
 - v0.2: osmdroid 地図表示＋現在地追従（開発ステップ2完了）
   - 位置情報パーミッション要求 → MAPNIK タイル表示 → MyLocationNewOverlay で現在地追従
   - 「現在地」ボタンで追従復帰
