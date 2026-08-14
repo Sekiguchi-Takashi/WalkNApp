@@ -1,6 +1,11 @@
 # HANDOFF — WalkNApp
 
 ## 現在地
+- v0.6: 取得判定＋Room保存（開発ステップ4完了）
+  - Room 2.6.1 + KSP 導入。item_instance / acquired_spawn テーブル
+  - 30m以内のマーカータップで取得 → DB保存＋マーカー消滅。範囲外は距離をトースト表示
+  - 取得済み spawnId は再表示されない（acquired_spawn で消し込み）
+  - 持ち物画面（取得日時・座標つき一覧）を追加。地図画面に所持数を常時表示
 - v0.5: マーカー描画不具合の修正
   - 原因: BitmapDrawable(null, bitmap) で Resources を null にしていたため描画されず
   - 対策: osmdroid 標準マーカーアイコンを複製し PorterDuff.SRC_IN でレアリティ色に着色
