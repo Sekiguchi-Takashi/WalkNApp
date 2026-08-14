@@ -1,6 +1,10 @@
 # HANDOFF — WalkNApp
 
 ## 現在地
+- v0.5: マーカー描画不具合の修正
+  - 原因: BitmapDrawable(null, bitmap) で Resources を null にしていたため描画されず
+  - 対策: osmdroid 標準マーカーアイコンを複製し PorterDuff.SRC_IN でレアリティ色に着色
+  - あわせて infoWindow を null 化（bonuspack レイアウト依存の回避）
 - v0.4: 決定論スポーン＋マーカー表示（開発ステップ3完了）
   - SpawnEngine: 0.0015度グリッドセル（約166m角）＋日付シードで配置決定。geohash の代わりに整数グリッドを採用（隣接セル算出が単純なため）
   - 自セル＋隣接8セルを表示。セル移動時のみ再計算

@@ -2,10 +2,8 @@ package com.appathy.walknapp
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.drawable.BitmapDrawable
-import android.graphics.Bitmap
+import android.graphics.PorterDuff
+import android.graphics.drawable.Drawable
 import android.os.Bundle
 import android.preference.PreferenceManager
 import android.widget.Toast
@@ -97,16 +95,11 @@ fun WalkMapScreen() {
     }
 }
 
-private fun dotDrawable(colorInt: Int): BitmapDrawable {
-    val size = 48
-    val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bmp)
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    paint.color = 0x66000000
-    canvas.drawCircle(size / 2f, size / 2f, size / 2f - 2f, paint)
-    paint.color = colorInt
-    canvas.drawCircle(size / 2f, size / 2f, size / 2f - 7f, paint)
-    return BitmapDrawable(null, bmp)
+private fun rarityIcon(mapView: MapView, colorInt: Int): Drawable? {
+    val base = Marker(mapView).icon ?: return null
+    val d = base.constantState?.newDrawable()?.mutate() ?: base.mutate()
+    d.setColorFilter(colorInt, PorterDuff.Mode.SRC_IN)
+    return d
 }
 
 @Composable
@@ -147,9 +140,10 @@ fun MapContent() {
                     shown.forEach { sp ->
                         val m = Marker(mapView)
                         m.position = GeoPoint(sp.lat, sp.lng)
-                        m.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                        m.icon = dotDrawable(sp.itemDef.rarity.colorHex)
+                        m.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                        rarityIcon(mapView, sp.itemDef.rarity.colorHex)?.let { m.icon = it }
                         m.title = "${sp.itemDef.name} (${sp.itemDef.rarity.label})"
+                        m.infoWindow = null
                         m.setOnMarkerClickListener { _, _ ->
                             val d = SpawnEngine.distanceMeters(
                                 loc.latitude, loc.longitude, sp.lat, sp.lng
