@@ -50,6 +50,8 @@ import com.appathy.walknapp.data.AssetMetadata
 import com.appathy.walknapp.data.AssetStatus
 import com.appathy.walknapp.data.WalkDatabase
 import java.util.UUID
+import com.appathy.walknapp.data.WalkSessionEntity
+import com.appathy.walknapp.session.SessionTracker
 import com.appathy.walknapp.spawn.ItemCatalog
 import com.appathy.walknapp.spawn.SpawnEngine
 import com.appathy.walknapp.spawn.SpawnPoint
@@ -99,7 +101,7 @@ fun RootScreen() {
     ) { result ->
         hasPermission = result[Manifest.permission.ACCESS_FINE_LOCATION] == true
     }
-    var showInventory by remember { mutableStateOf(false) }
+    var screen by remember { mutableStateOf("map") }
 
     if (!hasPermission) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -117,10 +119,13 @@ fun RootScreen() {
         return
     }
 
-    if (showInventory) {
-        InventoryScreen(onBack = { showInventory = false })
-    } else {
-        MapContent(onOpenInventory = { showInventory = true })
+    when (screen) {
+        "inventory" -> InventoryScreen(onBack = { screen = "map" })
+        "history" -> HistoryScreen(onBack = { screen = "map" })
+        else -> MapContent(
+            onOpenInventory = { screen = "inventory" },
+            onOpenHistory = { screen = "history" }
+        )
     }
 }
 
@@ -132,7 +137,7 @@ private fun rarityIcon(mapView: MapView, colorInt: Int): Drawable? {
 }
 
 @Composable
-fun MapContent(onOpenInventory: () -> Unit) {
+fun MapContent(onOpenInventory: () -> Unit, onOpenHistory: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val db = remember { WalkDatabase.get(context) }
@@ -141,6 +146,11 @@ fun MapContent(onOpenInventory: () -> Unit) {
     var spawnCount by remember { mutableStateOf(0) }
     var nearestText by remember { mutableStateOf("現在地を取得中…") }
     var refreshKey by remember { mutableStateOf(0) }
+
+    val tracker = remember { SessionTracker(context) }
+    var sessionId by remember { mutableStateOf<Long?>(null) }
+    var sessionSteps by remember { mutableStateOf(0) }
+    var sessionDistance by remember { mutableStateOf(0.0) }
 
     val mapView = remember {
         MapView(context).apply {
@@ -209,6 +219,7 @@ fun MapContent(onOpenInventory: () -> Unit) {
                                             acquiredLat = here.latitude,
                                             acquiredLng = here.longitude,
                                             spawnId = sp.id,
+                                            acquiredSteps = tracker.steps,
                                             status = AssetStatus.INTERNAL.name
                                         )
                                     )
@@ -223,6 +234,7 @@ fun MapContent(onOpenInventory: () -> Unit) {
                                             detail = sp.id
                                         )
                                     )
+                                    tracker.countItem()
                                     mapView.overlays.remove(marker)
                                     mapView.invalidate()
                                     spawnCount = (spawnCount - 1).coerceAtLeast(0)
@@ -239,6 +251,11 @@ fun MapContent(onOpenInventory: () -> Unit) {
                     }
                     spawnCount = shown.size
                     mapView.invalidate()
+                }
+                if (sessionId != null) {
+                    tracker.onLocation(loc.latitude, loc.longitude, System.currentTimeMillis())
+                    sessionSteps = tracker.steps
+                    sessionDistance = tracker.distanceM
                 }
                 val nearest = shown.minByOrNull {
                     SpawnEngine.distanceMeters(loc.latitude, loc.longitude, it.lat, it.lng)
@@ -272,21 +289,78 @@ fun MapContent(onOpenInventory: () -> Unit) {
             Text("周辺アイテム: ${spawnCount}個", fontSize = 14.sp)
             Text(nearestText, fontSize = 14.sp)
             Text("所持: ${itemCount}個", fontSize = 14.sp)
+            if (sessionId != null) {
+                Text(
+                    "記録中: ${sessionSteps}歩 / ${sessionDistance.toInt()}m",
+                    fontSize = 14.sp
+                )
+            }
         }
-        Row(
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(16.dp),
-            horizontalArrangement = Arrangement.End
+            horizontalAlignment = Alignment.End
         ) {
-            Button(onClick = onOpenInventory) { Text("持ち物") }
             Button(
                 onClick = {
-                    locationOverlay.enableFollowLocation()
-                    locationOverlay.myLocation?.let { mapView.controller.animateTo(it) }
-                },
-                modifier = Modifier.padding(start = 8.dp)
-            ) { Text("現在地") }
+                    scope.launch {
+                        val current = sessionId
+                        if (current == null) {
+                            tracker.start()
+                            val now = System.currentTimeMillis()
+                            val id = db.dao().insertSession(WalkSessionEntity(startAt = now))
+                            sessionId = id
+                            sessionSteps = 0
+                            sessionDistance = 0.0
+                            val msg = if (tracker.hasStepSensor()) {
+                                "記録を開始しました"
+                            } else {
+                                "記録を開始（歩数センサーなし・距離のみ）"
+                            }
+                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                        } else {
+                            val saved = db.dao().sessionById(current)
+                            if (saved != null) {
+                                db.dao().updateSession(
+                                    saved.copy(
+                                        endAt = System.currentTimeMillis(),
+                                        steps = tracker.steps,
+                                        distanceM = tracker.distanceM,
+                                        trackJson = tracker.trackJson(),
+                                        invalidSegments = tracker.invalidSegments,
+                                        itemCount = tracker.itemCount
+                                    )
+                                )
+                            }
+                            tracker.stop()
+                            Toast.makeText(
+                                context,
+                                "記録を終了: ${tracker.steps}歩 / ${tracker.distanceM.toInt()}m / ${tracker.itemCount}個",
+                                Toast.LENGTH_LONG
+                            ).show()
+                            sessionId = null
+                        }
+                    }
+                }
+            ) { Text(if (sessionId == null) "記録開始" else "記録終了") }
+            Row(
+                modifier = Modifier.padding(top = 8.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+                Button(onClick = onOpenHistory) { Text("履歴") }
+                Button(
+                    onClick = onOpenInventory,
+                    modifier = Modifier.padding(start = 8.dp)
+                ) { Text("持ち物") }
+                Button(
+                    onClick = {
+                        locationOverlay.enableFollowLocation()
+                        locationOverlay.myLocation?.let { mapView.controller.animateTo(it) }
+                    },
+                    modifier = Modifier.padding(start = 8.dp)
+                ) { Text("現在地") }
+            }
         }
     }
 }
@@ -349,6 +423,46 @@ fun InventoryScreen(onBack: () -> Unit) {
                                 "地点: ${"%.5f".format(asset.acquiredLat)}, ${"%.5f".format(asset.acquiredLng)}",
                                 fontSize = 12.sp
                             )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun HistoryScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    val db = remember { WalkDatabase.get(context) }
+    val sessions by db.dao().observeSessions().collectAsState(initial = emptyList())
+    val fmt = remember { SimpleDateFormat("MM/dd HH:mm", Locale.JAPAN) }
+
+    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Button(onClick = onBack) { Text("戻る") }
+            Text("  履歴 ${sessions.size}件", fontSize = 18.sp, modifier = Modifier.padding(start = 8.dp))
+        }
+        if (sessions.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("まだ記録がありません")
+            }
+        } else {
+            LazyColumn(modifier = Modifier.padding(top = 12.dp)) {
+                items(sessions) { s: WalkSessionEntity ->
+                    Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(fmt.format(Date(s.startAt)), fontSize = 16.sp)
+                            Text(
+                                if (s.endAt == null) "記録中" else "${s.steps}歩 / ${s.distanceM.toInt()}m / ${s.itemCount}個",
+                                fontSize = 14.sp
+                            )
+                            if (s.invalidSegments > 0) {
+                                Text("除外区間: ${s.invalidSegments}", fontSize = 12.sp)
+                            }
                         }
                     }
                 }

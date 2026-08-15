@@ -1,6 +1,19 @@
 # HANDOFF — WalkNApp
 
 ## 現在地
+- v0.9: deploy.sh を恒久仕様に差し替え
+  - pull --rebase とタグ発行（GitHub API 経由）を含む1コマンド完結型
+  - shebang は Termux 絶対パス
+  - release buildType の signingConfig 指定を削除。配布ビルドの署名は release.yml と ci/appathy.keystore に委ねる
+  - .github/workflows/release.yml と ci/ は削除しない（カタログ管理システムが API 経由でコミットするため）
+- v0.8: セッション記録（開発ステップ5完了）
+  - walk_session テーブル追加（Room version 3）。開始/終了ボタンで記録
+  - 歩数は TYPE_STEP_COUNTER センサー（Health Connect は v0.9 で対応）
+  - 距離は位置更新の差分累積。3m未満のノイズは無視、15km/h超の区間は除外して invalid_segments に計上
+  - 軌跡を trackJson に保存（小数5桁に丸め）
+  - 取得時に asset.acquired_steps へセッション歩数を記録（Phase2 メタデータで使用）
+  - 履歴画面を追加。地図画面は 記録開始/終了・履歴・持ち物・現在地 の4ボタン構成
+  - 制約: アプリを閉じると記録が止まる（フォアグラウンドサービス化は後日）
 - v0.7: Phase 2 (Universal Asset Platform) 対応のデータモデル移行
   - item_instance を asset テーブルに置換。主キーを UUID 化、Room version 2
   - AssetStatus(INTERNAL/PENDING_MINT/MINTED/EXPORTED)、owner_ref/chain_ref/metadata_uri を予約列として追加
@@ -39,3 +52,8 @@
 - ビルド: GitHub Actions（gradle 8.9 / AGP 8.5.2 / Kotlin 2.0.20 / compileSdk 35）
 - APK は Actions の artifact "WalkNApp-debug" から取得
 - NFT/外部連携コードは Phase 2 まで書かない（SPEC §7 の布石のみ守る）
+
+## deploy.sh 恒久ルール
+- pull --rebase 必須（カタログ管理システムが release.yml と ci/appathy.keystore を API 経由で直接コミットするため）
+- ci/ と .github/workflows/release.yml は削除しない
+- タグ発行 → Actions がビルド → Release 作成 → 自作アプリストアに更新として表示

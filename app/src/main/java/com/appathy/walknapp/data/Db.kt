@@ -11,6 +11,7 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 enum class AssetStatus { INTERNAL, PENDING_MINT, MINTED, EXPORTED }
@@ -35,6 +36,18 @@ data class AssetEntity(
 data class AcquiredSpawnEntity(
     @PrimaryKey val spawnId: String,
     @ColumnInfo(name = "acquired_at") val acquiredAt: Long
+)
+
+@Entity(tableName = "walk_session")
+data class WalkSessionEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    @ColumnInfo(name = "start_at") val startAt: Long,
+    @ColumnInfo(name = "end_at") val endAt: Long? = null,
+    @ColumnInfo(name = "steps") val steps: Int = 0,
+    @ColumnInfo(name = "distance_m") val distanceM: Double = 0.0,
+    @ColumnInfo(name = "track_json") val trackJson: String = "[]",
+    @ColumnInfo(name = "invalid_segments") val invalidSegments: Int = 0,
+    @ColumnInfo(name = "item_count") val itemCount: Int = 0
 )
 
 @Entity(tableName = "asset_event")
@@ -71,11 +84,28 @@ interface WalkDao {
 
     @Query("UPDATE asset SET status = :status WHERE uuid = :uuid")
     suspend fun updateStatus(uuid: String, status: String)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSession(session: WalkSessionEntity): Long
+
+    @Update
+    suspend fun updateSession(session: WalkSessionEntity)
+
+    @Query("SELECT * FROM walk_session ORDER BY start_at DESC")
+    fun observeSessions(): Flow<List<WalkSessionEntity>>
+
+    @Query("SELECT * FROM walk_session WHERE id = :id")
+    suspend fun sessionById(id: Long): WalkSessionEntity?
 }
 
 @Database(
-    entities = [AssetEntity::class, AcquiredSpawnEntity::class, AssetEventEntity::class],
-    version = 2,
+    entities = [
+        AssetEntity::class,
+        AcquiredSpawnEntity::class,
+        AssetEventEntity::class,
+        WalkSessionEntity::class
+    ],
+    version = 3,
     exportSchema = false
 )
 abstract class WalkDatabase : RoomDatabase() {
