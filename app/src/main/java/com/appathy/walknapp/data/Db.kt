@@ -59,6 +59,11 @@ data class AssetEventEntity(
     @ColumnInfo(name = "detail") val detail: String? = null
 )
 
+data class CollectedCount(
+    @ColumnInfo(name = "item_def_id") val itemDefId: String,
+    @ColumnInfo(name = "cnt") val count: Int
+)
+
 @Dao
 interface WalkDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -96,6 +101,15 @@ interface WalkDao {
 
     @Query("SELECT * FROM walk_session WHERE id = :id")
     suspend fun sessionById(id: Long): WalkSessionEntity?
+
+    @Query("SELECT item_def_id, COUNT(*) AS cnt FROM asset GROUP BY item_def_id")
+    fun observeCollected(): Flow<List<CollectedCount>>
+
+    @Query("SELECT IFNULL(SUM(steps),0) FROM walk_session")
+    fun observeTotalSteps(): Flow<Int>
+
+    @Query("SELECT IFNULL(SUM(distance_m),0) FROM walk_session")
+    fun observeTotalDistance(): Flow<Double>
 }
 
 @Database(

@@ -96,6 +96,8 @@ class SessionTracker(context: Context) : SensorEventListener {
 
     fun hasStepSensor(): Boolean = stepSensor != null
 
+    fun points(): List<TrackPoint> = track.toList()
+
     fun trackJson(): String {
         val arr = JSONArray()
         track.forEach {

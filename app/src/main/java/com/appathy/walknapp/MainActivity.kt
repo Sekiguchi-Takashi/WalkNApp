@@ -50,9 +50,11 @@ import com.appathy.walknapp.data.AssetMetadata
 import com.appathy.walknapp.data.AssetStatus
 import com.appathy.walknapp.data.WalkDatabase
 import java.util.UUID
+import com.appathy.walknapp.data.CollectedCount
 import com.appathy.walknapp.data.WalkSessionEntity
 import com.appathy.walknapp.session.SessionTracker
 import com.appathy.walknapp.spawn.ItemCatalog
+import com.appathy.walknapp.spawn.Rarity
 import com.appathy.walknapp.spawn.SpawnEngine
 import com.appathy.walknapp.spawn.SpawnPoint
 import kotlinx.coroutines.delay
@@ -62,6 +64,7 @@ import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.Polyline
 import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 import java.text.SimpleDateFormat
@@ -122,9 +125,11 @@ fun RootScreen() {
     when (screen) {
         "inventory" -> InventoryScreen(onBack = { screen = "map" })
         "history" -> HistoryScreen(onBack = { screen = "map" })
+        "zukan" -> ZukanScreen(onBack = { screen = "map" })
         else -> MapContent(
             onOpenInventory = { screen = "inventory" },
-            onOpenHistory = { screen = "history" }
+            onOpenHistory = { screen = "history" },
+            onOpenZukan = { screen = "zukan" }
         )
     }
 }
@@ -137,7 +142,11 @@ private fun rarityIcon(mapView: MapView, colorInt: Int): Drawable? {
 }
 
 @Composable
-fun MapContent(onOpenInventory: () -> Unit, onOpenHistory: () -> Unit) {
+fun MapContent(
+    onOpenInventory: () -> Unit,
+    onOpenHistory: () -> Unit,
+    onOpenZukan: () -> Unit
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val db = remember { WalkDatabase.get(context) }
@@ -151,6 +160,7 @@ fun MapContent(onOpenInventory: () -> Unit, onOpenHistory: () -> Unit) {
     var sessionId by remember { mutableStateOf<Long?>(null) }
     var sessionSteps by remember { mutableStateOf(0) }
     var sessionDistance by remember { mutableStateOf(0.0) }
+    var bonusLevel by remember { mutableStateOf(0) }
 
     val mapView = remember {
         MapView(context).apply {
@@ -167,22 +177,35 @@ fun MapContent(onOpenInventory: () -> Unit, onOpenHistory: () -> Unit) {
         }
     }
 
+    val trackLine = remember {
+        Polyline().apply {
+            outlinePaint.color = 0xFF1E88E5.toInt()
+            outlinePaint.strokeWidth = 8f
+        }
+    }
+
     LaunchedEffect(refreshKey) {
         if (!mapView.overlays.contains(locationOverlay)) {
             mapView.overlays.add(locationOverlay)
         }
+        if (!mapView.overlays.contains(trackLine)) {
+            mapView.overlays.add(0, trackLine)
+        }
         var lastCell = ""
+        var lastBonus = -1
         var shown = listOf<SpawnPoint>()
         while (true) {
             val loc = locationOverlay.myLocation
             if (loc != null) {
                 val cellKey =
                     "${SpawnEngine.cellXOf(loc.longitude)}:${SpawnEngine.cellYOf(loc.latitude)}"
-                if (cellKey != lastCell) {
+                if (cellKey != lastCell || bonusLevel != lastBonus) {
                     lastCell = cellKey
+                    lastBonus = bonusLevel
                     val acquired = db.dao().acquiredSpawnIds().toSet()
-                    shown = SpawnEngine.spawnsAround(loc.latitude, loc.longitude)
-                        .filter { it.id !in acquired }
+                    shown = SpawnEngine.spawnsAround(
+                        loc.latitude, loc.longitude, bonus = bonusLevel
+                    ).filter { it.id !in acquired }
                     mapView.overlays.removeAll { it is Marker }
                     shown.forEach { sp ->
                         val m = Marker(mapView)
@@ -256,6 +279,16 @@ fun MapContent(onOpenInventory: () -> Unit, onOpenHistory: () -> Unit) {
                     tracker.onLocation(loc.latitude, loc.longitude, System.currentTimeMillis())
                     sessionSteps = tracker.steps
                     sessionDistance = tracker.distanceM
+                    bonusLevel = when {
+                        sessionSteps >= 10000 -> 3
+                        sessionSteps >= 6000 -> 2
+                        sessionSteps >= 3000 -> 1
+                        else -> 0
+                    }
+                    trackLine.setPoints(
+                        tracker.points().map { GeoPoint(it.lat, it.lng) }
+                    )
+                    mapView.invalidate()
                 }
                 val nearest = shown.minByOrNull {
                     SpawnEngine.distanceMeters(loc.latitude, loc.longitude, it.lat, it.lng)
@@ -294,6 +327,9 @@ fun MapContent(onOpenInventory: () -> Unit, onOpenHistory: () -> Unit) {
                     "記録中: ${sessionSteps}歩 / ${sessionDistance.toInt()}m",
                     fontSize = 14.sp
                 )
+                if (bonusLevel > 0) {
+                    Text("歩数ボーナス +${bonusLevel}", fontSize = 14.sp)
+                }
             }
         }
         Column(
@@ -348,7 +384,11 @@ fun MapContent(onOpenInventory: () -> Unit, onOpenHistory: () -> Unit) {
                 modifier = Modifier.padding(top = 8.dp),
                 horizontalArrangement = Arrangement.End
             ) {
-                Button(onClick = onOpenHistory) { Text("履歴") }
+                Button(onClick = onOpenZukan) { Text("図鑑") }
+                Button(
+                    onClick = onOpenHistory,
+                    modifier = Modifier.padding(start = 8.dp)
+                ) { Text("履歴") }
                 Button(
                     onClick = onOpenInventory,
                     modifier = Modifier.padding(start = 8.dp)
@@ -463,6 +503,64 @@ fun HistoryScreen(onBack: () -> Unit) {
                             if (s.invalidSegments > 0) {
                                 Text("除外区間: ${s.invalidSegments}", fontSize = 12.sp)
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ZukanScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    val db = remember { WalkDatabase.get(context) }
+    val collected by db.dao().observeCollected().collectAsState(initial = emptyList())
+    val totalSteps by db.dao().observeTotalSteps().collectAsState(initial = 0)
+    val totalDistance by db.dao().observeTotalDistance().collectAsState(initial = 0.0)
+
+    val counts: Map<String, Int> = collected.associate { c: CollectedCount -> c.itemDefId to c.count }
+    val discovered = ItemCatalog.all.count { counts.containsKey(it.id) }
+
+    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Button(onClick = onBack) { Text("戻る") }
+            Text(
+                "  図鑑 ${discovered}/${ItemCatalog.all.size}",
+                fontSize = 18.sp,
+                modifier = Modifier.padding(start = 8.dp)
+            )
+        }
+        Card(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text("総歩数 ${totalSteps}歩 / 総距離 ${totalDistance.toInt()}m", fontSize = 14.sp)
+                val byRarity = Rarity.values().joinToString("  ") { r ->
+                    val n = ItemCatalog.all.filter { it.rarity == r }.sumOf { counts[it.id] ?: 0 }
+                    "${r.label}:${n}"
+                }
+                Text(byRarity, fontSize = 12.sp)
+            }
+        }
+        LazyColumn(modifier = Modifier.padding(top = 12.dp)) {
+            items(ItemCatalog.all) { def ->
+                val n = counts[def.id] ?: 0
+                Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        if (n > 0) {
+                            Text("${def.name}  [${def.rarity.label}]  x${n}", fontSize = 16.sp)
+                            Text(
+                                "分類: ${def.category.name} / NFT化: ${def.mintPolicy.name}",
+                                fontSize = 12.sp
+                            )
+                            if (def.capabilities.isNotEmpty()) {
+                                Text("用途: ${def.capabilities.joinToString(", ")}", fontSize = 12.sp)
+                            }
+                        } else {
+                            Text("？？？  [${def.rarity.label}]", fontSize = 16.sp)
+                            Text("未発見", fontSize = 12.sp)
                         }
                     }
                 }
