@@ -1,6 +1,9 @@
 # HANDOFF — WalkNApp
 
 ## 現在地
+- v1.1: build.yml から actions/upload-artifact ステップを削除
+  - Artifacts 無料枠(0.5GB)枯渇による "Artifact storage quota has been hit" 回避
+  - APK は Release から配布するため Artifacts 不要。build.yml はコンパイル確認専用と割り切る
 - v1.0: アイコン差し替え＋機能追加（開発ステップ6 相当まで完了）
   - アプリアイコンを歩行シルエットに差し替え（アダプティブアイコン対応、mdpi〜xxxhdpi＋round）。表示名を WalkN に変更
   - 図鑑画面を追加: 全18種の発見状況、レアリティ別集計、総歩数・総距離、用途(capabilities)とNFT化ポリシーを表示
@@ -63,3 +66,4 @@
 - pull --rebase 必須（カタログ管理システムが release.yml と ci/appathy.keystore を API 経由で直接コミットするため）
 - ci/ と .github/workflows/release.yml は削除しない
 - タグ発行 → Actions がビルド → Release 作成 → 自作アプリストアに更新として表示
+- build.yml に actions/upload-artifact を入れない（Artifacts 無料枠枯渇でビルドが落ちるため）。APK 配布は Release 経由
