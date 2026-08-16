@@ -53,6 +53,7 @@ import java.util.UUID
 import com.appathy.walknapp.data.CollectedCount
 import com.appathy.walknapp.data.WalkSessionEntity
 import com.appathy.walknapp.session.SessionTracker
+import com.appathy.walknapp.session.SpeedFormat
 import com.appathy.walknapp.spawn.ItemCatalog
 import com.appathy.walknapp.spawn.Rarity
 import com.appathy.walknapp.spawn.SpawnEngine
@@ -161,6 +162,8 @@ fun MapContent(
     var sessionSteps by remember { mutableStateOf(0) }
     var sessionDistance by remember { mutableStateOf(0.0) }
     var bonusLevel by remember { mutableStateOf(0) }
+    var currentSpeed by remember { mutableStateOf(0.0) }
+    var avgSpeed by remember { mutableStateOf(0.0) }
 
     val mapView = remember {
         MapView(context).apply {
@@ -285,6 +288,10 @@ fun MapContent(
                         sessionSteps >= 3000 -> 1
                         else -> 0
                     }
+                    val now = System.currentTimeMillis()
+                    tracker.decayIfIdle(now)
+                    currentSpeed = tracker.currentSpeedMps
+                    avgSpeed = tracker.averageSpeedMps(now)
                     trackLine.setPoints(
                         tracker.points().map { GeoPoint(it.lat, it.lng) }
                     )
@@ -325,6 +332,14 @@ fun MapContent(
             if (sessionId != null) {
                 Text(
                     "記録中: ${sessionSteps}歩 / ${sessionDistance.toInt()}m",
+                    fontSize = 14.sp
+                )
+                Text(
+                    "速度 ${SpeedFormat.kmh(currentSpeed)} (${SpeedFormat.label(currentSpeed)})",
+                    fontSize = 14.sp
+                )
+                Text(
+                    "ペース ${SpeedFormat.pace(currentSpeed)} / 平均 ${SpeedFormat.kmh(avgSpeed)}",
                     fontSize = 14.sp
                 )
                 if (bonusLevel > 0) {
@@ -500,6 +515,15 @@ fun HistoryScreen(onBack: () -> Unit) {
                                 if (s.endAt == null) "記録中" else "${s.steps}歩 / ${s.distanceM.toInt()}m / ${s.itemCount}個",
                                 fontSize = 14.sp
                             )
+                            if (s.endAt != null) {
+                                val sec = (s.endAt - s.startAt) / 1000.0
+                                val avg = if (sec > 0) s.distanceM / sec else 0.0
+                                val min = (sec / 60).toInt()
+                                Text(
+                                    "${min}分 / 平均 ${SpeedFormat.kmh(avg)} / ${SpeedFormat.pace(avg)}",
+                                    fontSize = 12.sp
+                                )
+                            }
                             if (s.invalidSegments > 0) {
                                 Text("除外区間: ${s.invalidSegments}", fontSize = 12.sp)
                             }

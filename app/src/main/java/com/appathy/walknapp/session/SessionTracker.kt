@@ -30,11 +30,19 @@ class SessionTracker(context: Context) : SensorEventListener {
         private set
     var itemCount: Int = 0
         private set
+    var currentSpeedMps: Double = 0.0
+        private set
+    var startedAt: Long = 0L
+        private set
 
     private val track = mutableListOf<TrackPoint>()
     private var last: TrackPoint? = null
+    private val recent = mutableListOf<Pair<Double, Long>>()
 
     fun start() {
+        startedAt = System.currentTimeMillis()
+        currentSpeedMps = 0.0
+        recent.clear()
         steps = 0
         distanceM = 0.0
         invalidSegments = 0
@@ -69,6 +77,7 @@ class SessionTracker(context: Context) : SensorEventListener {
                     distanceM += d
                     track.add(p)
                     last = p
+                    pushRecent(d, at)
                     return
                 }
             }
@@ -79,6 +88,33 @@ class SessionTracker(context: Context) : SensorEventListener {
             track.add(p)
             last = p
         }
+    }
+
+    private fun pushRecent(d: Double, at: Long) {
+        recent.add(d to at)
+        val cutoff = at - 30_000
+        recent.removeAll { it.second < cutoff }
+        if (recent.size >= 2) {
+            val span = (recent.last().second - recent.first().second) / 1000.0
+            val dist = recent.drop(1).sumOf { it.first }
+            currentSpeedMps = if (span > 0) dist / span else 0.0
+        } else {
+            currentSpeedMps = 0.0
+        }
+    }
+
+    fun decayIfIdle(now: Long) {
+        val lastAt = recent.lastOrNull()?.second ?: return
+        if (now - lastAt > 15_000) {
+            currentSpeedMps = 0.0
+            recent.clear()
+        }
+    }
+
+    fun averageSpeedMps(now: Long): Double {
+        if (startedAt == 0L) return 0.0
+        val sec = (now - startedAt) / 1000.0
+        return if (sec > 0) distanceM / sec else 0.0
     }
 
     override fun onSensorChanged(event: SensorEvent) {

@@ -1,6 +1,12 @@
 # HANDOFF — WalkNApp
 
 ## 現在地
+- v1.2: ウォーキング速度表示
+  - SessionTracker に currentSpeedMps（直近30秒の移動距離÷経過時間で平滑化）と averageSpeedMps を追加
+  - 15秒以上位置更新が進まない場合は速度を 0 にリセット（decayIfIdle）
+  - SpeedFormat: km/h 表記、ペース(分:秒/km)、速さラベル（停止中/ゆっくり/ふつう/早歩き/かなり速い/走行中）
+  - 地図画面に「速度 x.x km/h (ラベル)」「ペース m:ss /km / 平均 x.x km/h」を記録中に表示
+  - 履歴画面に所要時間・平均速度・平均ペースを追加
 - v1.1: build.yml から actions/upload-artifact ステップを削除
   - Artifacts 無料枠(0.5GB)枯渇による "Artifact storage quota has been hit" 回避
   - APK は Release から配布するため Artifacts 不要。build.yml はコンパイル確認専用と割り切る
