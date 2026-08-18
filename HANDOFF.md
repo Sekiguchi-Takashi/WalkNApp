@@ -1,6 +1,12 @@
 # HANDOFF — WalkNApp
 
 ## 現在地
+- v1.3: 納品規約への準拠
+  - build.yml を削除。CI は release.yml（タグ起動）のみに一本化
+  - deploy.sh に rm -f .github/workflows/build.yml と git rm --cached を追加（unzip -o は端末の旧ファイルを消さないため）
+  - タグ発行をローカル方式に変更: git fetch --tags --force -> git tag --list 'v*' | sort -V | tail -1 から算出 -> git tag -> git push origin タグ名。GitHub API は使わない
+  - 第2引数 notag で push のみ
+  - ci/ と .github/workflows/release.yml は削除・追跡解除しない
 - v1.2: ウォーキング速度表示
   - SessionTracker に currentSpeedMps（直近30秒の移動距離÷経過時間で平滑化）と averageSpeedMps を追加
   - 15秒以上位置更新が進まない場合は速度を 0 にリセット（decayIfIdle）
