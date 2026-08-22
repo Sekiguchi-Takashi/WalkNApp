@@ -1,9 +1,8 @@
 package com.appathy.walknapp
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.PorterDuff
-import android.graphics.drawable.Drawable
 import android.os.Bundle
 import android.preference.PreferenceManager
 import android.widget.Toast
@@ -11,19 +10,27 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -37,42 +44,42 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import android.content.Intent
-import com.appathy.walknapp.data.AcquiredSpawnEntity
 import com.appathy.walknapp.data.AssetEntity
 import com.appathy.walknapp.data.AssetEventEntity
 import com.appathy.walknapp.data.AssetMetadata
 import com.appathy.walknapp.data.AssetStatus
+import com.appathy.walknapp.data.DailyQuotaEntity
+import com.appathy.walknapp.data.LoadoutEntity
+import com.appathy.walknapp.data.ShoeEntity
 import com.appathy.walknapp.data.WalkDatabase
-import java.util.UUID
-import com.appathy.walknapp.data.CollectedCount
 import com.appathy.walknapp.data.WalkSessionEntity
-import com.appathy.walknapp.session.SessionTracker
+import com.appathy.walknapp.game.Balance
+import com.appathy.walknapp.game.ItemRank
+import com.appathy.walknapp.game.ShoeType
+import com.appathy.walknapp.game.SpeedState
+import com.appathy.walknapp.game.WalkEngine
+import com.appathy.walknapp.game.WearType
 import com.appathy.walknapp.session.SpeedFormat
-import com.appathy.walknapp.spawn.ItemCatalog
-import com.appathy.walknapp.spawn.Rarity
-import com.appathy.walknapp.spawn.SpawnEngine
-import com.appathy.walknapp.spawn.SpawnPoint
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
-import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
-const val PICKUP_RADIUS_M = 30.0
+import java.util.UUID
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -82,17 +89,39 @@ class MainActivity : ComponentActivity() {
         Configuration.getInstance().userAgentValue = packageName
         setContent {
             MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    RootScreen()
-                }
+                Surface(modifier = Modifier.fillMaxSize()) { RootScreen() }
             }
         }
+    }
+}
+
+fun todayKey(): String = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
+
+suspend fun ensureSeed(db: WalkDatabase) {
+    if (db.dao().allShoes().isEmpty()) {
+        ShoeType.values().forEachIndexed { i, t ->
+            db.dao().insertShoe(
+                ShoeEntity(
+                    uuid = UUID.randomUUID().toString(),
+                    shoeType = t.name,
+                    durability = Balance.DURABILITY_MAX,
+                    equipped = i == 1
+                )
+            )
+        }
+    }
+    if (db.dao().loadout() == null) {
+        db.dao().saveLoadout(LoadoutEntity(wearType = WearType.STANDARD.name))
     }
 }
 
 @Composable
 fun RootScreen() {
     val context = LocalContext.current
+    val db = remember { WalkDatabase.get(context) }
+    var seeded by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { ensureSeed(db); seeded = true }
+
     var hasPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(
@@ -102,10 +131,9 @@ fun RootScreen() {
     }
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { result ->
-        hasPermission = result[Manifest.permission.ACCESS_FINE_LOCATION] == true
-    }
-    var screen by remember { mutableStateOf("map") }
+    ) { r -> hasPermission = r[Manifest.permission.ACCESS_FINE_LOCATION] == true }
+
+    var screen by remember { mutableStateOf("walk") }
 
     if (!hasPermission) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -113,57 +141,49 @@ fun RootScreen() {
                 launcher.launch(
                     arrayOf(
                         Manifest.permission.ACCESS_FINE_LOCATION,
-                        Manifest.permission.ACCESS_COARSE_LOCATION
+                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                        Manifest.permission.ACTIVITY_RECOGNITION
                     )
                 )
-            }) {
-                Text("位置情報を許可して開始")
-            }
+            }) { Text("位置情報と歩数を許可して開始") }
         }
         return
     }
+    if (!seeded) return
 
     when (screen) {
-        "inventory" -> InventoryScreen(onBack = { screen = "map" })
-        "history" -> HistoryScreen(onBack = { screen = "map" })
-        "zukan" -> ZukanScreen(onBack = { screen = "map" })
-        else -> MapContent(
-            onOpenInventory = { screen = "inventory" },
-            onOpenHistory = { screen = "history" },
-            onOpenZukan = { screen = "zukan" }
+        "equip" -> EquipScreen { screen = "walk" }
+        "bag" -> BagScreen { screen = "walk" }
+        "history" -> HistoryScreen { screen = "walk" }
+        else -> WalkScreen(
+            onEquip = { screen = "equip" },
+            onBag = { screen = "bag" },
+            onHistory = { screen = "history" }
         )
     }
 }
 
-private fun rarityIcon(mapView: MapView, colorInt: Int): Drawable? {
-    val base = Marker(mapView).icon ?: return null
-    val d = base.constantState?.newDrawable()?.mutate() ?: base.mutate()
-    d.setColorFilter(colorInt, PorterDuff.Mode.SRC_IN)
-    return d
-}
-
 @Composable
-fun MapContent(
-    onOpenInventory: () -> Unit,
-    onOpenHistory: () -> Unit,
-    onOpenZukan: () -> Unit
-) {
+fun WalkScreen(onEquip: () -> Unit, onBag: () -> Unit, onHistory: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val db = remember { WalkDatabase.get(context) }
-    val itemCount by db.dao().observeAssetCount().collectAsState(initial = 0)
+    val engine = remember { WalkEngine(context) }
 
-    var spawnCount by remember { mutableStateOf(0) }
-    var nearestText by remember { mutableStateOf("現在地を取得中…") }
-    var refreshKey by remember { mutableStateOf(0) }
+    val shoe by db.dao().observeEquippedShoe().collectAsState(initial = null)
+    val loadout by db.dao().observeLoadout().collectAsState(initial = null)
+    val quota by db.dao().observeQuota(todayKey()).collectAsState(initial = null)
 
-    val tracker = remember { SessionTracker(context) }
+    var running by remember { mutableStateOf(false) }
     var sessionId by remember { mutableStateOf<Long?>(null) }
-    var sessionSteps by remember { mutableStateOf(0) }
-    var sessionDistance by remember { mutableStateOf(0.0) }
-    var bonusLevel by remember { mutableStateOf(0) }
-    var currentSpeed by remember { mutableStateOf(0.0) }
-    var avgSpeed by remember { mutableStateOf(0.0) }
+    var speed by remember { mutableStateOf(0.0) }
+    var state by remember { mutableStateOf(SpeedState.IDLE) }
+    var validSec by remember { mutableStateOf(0L) }
+    var continuousSec by remember { mutableStateOf(0L) }
+    var distance by remember { mutableStateOf(0.0) }
+    var steps by remember { mutableStateOf(0) }
+    var source by remember { mutableStateOf("GPS") }
+    var graceLeft by remember { mutableStateOf(0L) }
 
     val mapView = remember {
         MapView(context).apply {
@@ -175,253 +195,367 @@ fun MapContent(
     }
     val locationOverlay = remember {
         MyLocationNewOverlay(GpsMyLocationProvider(context), mapView).apply {
-            enableMyLocation()
-            enableFollowLocation()
+            enableMyLocation(); enableFollowLocation()
         }
     }
-
     val trackLine = remember {
         Polyline().apply {
             outlinePaint.color = 0xFF1E88E5.toInt()
-            outlinePaint.strokeWidth = 8f
+            outlinePaint.strokeWidth = 9f
         }
     }
 
-    LaunchedEffect(refreshKey) {
-        if (!mapView.overlays.contains(locationOverlay)) {
-            mapView.overlays.add(locationOverlay)
-        }
-        if (!mapView.overlays.contains(trackLine)) {
-            mapView.overlays.add(0, trackLine)
-        }
-        var lastCell = ""
-        var lastBonus = -1
-        var shown = listOf<SpawnPoint>()
+    val wear = WearType.valueOf(loadout?.wearType ?: WearType.STANDARD.name)
+    val shoeType = shoe?.let { ShoeType.valueOf(it.shoeType) }
+    val cap = Balance.DAILY_CAP_BASE +
+            ((quota?.streakDays ?: 0) * Balance.STREAK_BONUS_PER_DAY)
+                .coerceAtMost(Balance.STREAK_BONUS_MAX)
+    val earned = quota?.earnedPoints ?: 0
+
+    LaunchedEffect(Unit) {
+        if (!mapView.overlays.contains(locationOverlay)) mapView.overlays.add(locationOverlay)
+        if (!mapView.overlays.contains(trackLine)) mapView.overlays.add(0, trackLine)
+        var lastAt = System.currentTimeMillis()
         while (true) {
-            val loc = locationOverlay.myLocation
-            if (loc != null) {
-                val cellKey =
-                    "${SpawnEngine.cellXOf(loc.longitude)}:${SpawnEngine.cellYOf(loc.latitude)}"
-                if (cellKey != lastCell || bonusLevel != lastBonus) {
-                    lastCell = cellKey
-                    lastBonus = bonusLevel
-                    val acquired = db.dao().acquiredSpawnIds().toSet()
-                    shown = SpawnEngine.spawnsAround(
-                        loc.latitude, loc.longitude, bonus = bonusLevel
-                    ).filter { it.id !in acquired }
-                    mapView.overlays.removeAll { it is Marker }
-                    shown.forEach { sp ->
-                        val m = Marker(mapView)
-                        m.position = GeoPoint(sp.lat, sp.lng)
-                        m.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                        rarityIcon(mapView, sp.itemDef.rarity.colorHex)?.let { m.icon = it }
-                        m.title = sp.itemDef.name
-                        m.infoWindow = null
-                        m.setOnMarkerClickListener { marker, _ ->
-                            val here = locationOverlay.myLocation
-                            if (here == null) {
-                                Toast.makeText(context, "現在地が未取得です", Toast.LENGTH_SHORT).show()
-                                return@setOnMarkerClickListener true
-                            }
-                            val d = SpawnEngine.distanceMeters(
-                                here.latitude, here.longitude, sp.lat, sp.lng
-                            )
-                            if (d > PICKUP_RADIUS_M) {
-                                Toast.makeText(
-                                    context,
-                                    "${sp.itemDef.name} まで ${d.toInt()}m（${PICKUP_RADIUS_M.toInt()}m以内で拾えます）",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            } else {
-                                scope.launch {
-                                    val now = System.currentTimeMillis()
-                                    val uuid = UUID.randomUUID().toString()
-                                    db.dao().insertAsset(
-                                        AssetEntity(
-                                            uuid = uuid,
-                                            itemDefId = sp.itemDef.id,
-                                            collectionId = sp.itemDef.collectionId,
-                                            acquiredAt = now,
-                                            acquiredLat = here.latitude,
-                                            acquiredLng = here.longitude,
-                                            spawnId = sp.id,
-                                            acquiredSteps = tracker.steps,
-                                            status = AssetStatus.INTERNAL.name
-                                        )
-                                    )
-                                    db.dao().insertAcquiredSpawn(
-                                        AcquiredSpawnEntity(sp.id, now)
-                                    )
-                                    db.dao().insertEvent(
-                                        AssetEventEntity(
-                                            assetUuid = uuid,
-                                            kind = "ACQUIRE",
-                                            at = now,
-                                            detail = sp.id
-                                        )
-                                    )
-                                    tracker.countItem()
-                                    mapView.overlays.remove(marker)
-                                    mapView.invalidate()
-                                    spawnCount = (spawnCount - 1).coerceAtLeast(0)
-                                    Toast.makeText(
-                                        context,
-                                        "${sp.itemDef.name} を手に入れた！（${sp.itemDef.rarity.label}）",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                }
-                            }
-                            true
-                        }
-                        mapView.overlays.add(m)
-                    }
-                    spawnCount = shown.size
-                    mapView.invalidate()
-                }
-                if (sessionId != null) {
-                    tracker.onLocation(loc.latitude, loc.longitude, System.currentTimeMillis())
-                    sessionSteps = tracker.steps
-                    sessionDistance = tracker.distanceM
-                    bonusLevel = when {
-                        sessionSteps >= 10000 -> 3
-                        sessionSteps >= 6000 -> 2
-                        sessionSteps >= 3000 -> 1
-                        else -> 0
-                    }
-                    val now = System.currentTimeMillis()
-                    tracker.decayIfIdle(now)
-                    currentSpeed = tracker.currentSpeedMps
-                    avgSpeed = tracker.averageSpeedMps(now)
-                    trackLine.setPoints(
-                        tracker.points().map { GeoPoint(it.lat, it.lng) }
+            delay(2000)
+            val now = System.currentTimeMillis()
+            val elapsed = ((now - lastAt) / 1000).coerceAtLeast(1)
+            lastAt = now
+            if (!running) continue
+            locationOverlay.myLocation?.let { engine.onLocation(it.latitude, it.longitude, now) }
+            val t = engine.onTick(now, elapsed)
+            speed = t.speedKmh; state = t.state; validSec = t.validSec
+            continuousSec = t.continuousSec; distance = t.distanceM
+            steps = t.steps; source = t.speedSource; graceLeft = t.graceLeftSec
+            trackLine.setPoints(engine.points().map { GeoPoint(it.lat, it.lng) })
+            mapView.invalidate()
+
+            if (t.grantReady) {
+                val sid = sessionId ?: continue
+                val q = db.dao().quotaOf(todayKey()) ?: DailyQuotaEntity(todayKey())
+                if (q.earnedPoints >= cap) {
+                    db.dao().insertEvent(
+                        AssetEventEntity(
+                            assetUuid = null, kind = "OVERFLOW", at = now, detail = "cap=$cap"
+                        )
                     )
-                    mapView.invalidate()
-                }
-                val nearest = shown.minByOrNull {
-                    SpawnEngine.distanceMeters(loc.latitude, loc.longitude, it.lat, it.lng)
-                }
-                nearestText = if (nearest == null) {
-                    "周辺にアイテムなし"
+                    engine.consumeGrant()
                 } else {
-                    val d = SpawnEngine.distanceMeters(
-                        loc.latitude, loc.longitude, nearest.lat, nearest.lng
-                    ).toInt()
-                    if (d <= PICKUP_RADIUS_M) {
-                        "拾えます: ${nearest.itemDef.name} ${d}m"
-                    } else {
-                        "最寄り: ${nearest.itemDef.name} ${d}m"
+                    val rank = wear.rank
+                    val pt = rank.rollPoint().coerceAtMost(cap - q.earnedPoints)
+                    val here = locationOverlay.myLocation
+                    val uuid = UUID.randomUUID().toString()
+                    db.dao().insertAsset(
+                        AssetEntity(
+                            uuid = uuid,
+                            rank = rank.name,
+                            repairPoint = pt,
+                            acquiredAt = now,
+                            acquiredLat = here?.latitude ?: 0.0,
+                            acquiredLng = here?.longitude ?: 0.0,
+                            validSecAtGrant = t.continuousSec,
+                            avgSpeedKmh = t.speedKmh,
+                            shoeType = shoeType?.name ?: "",
+                            wearType = wear.name,
+                            speedSource = t.speedSource,
+                            sessionId = sid,
+                            status = AssetStatus.INTERNAL.name
+                        )
+                    )
+                    db.dao().insertEvent(
+                        AssetEventEntity(
+                            assetUuid = uuid, kind = "GRANT", at = now,
+                            detail = "${rank.name}+$pt"
+                        )
+                    )
+                    db.dao().loadout()?.let { lo ->
+                        db.dao().saveLoadout(lo.copy(repairWallet = lo.repairWallet + pt))
                     }
+                    db.dao().saveQuota(q.copy(earnedPoints = q.earnedPoints + pt))
+                    engine.consumeGrant()
+                    Toast.makeText(
+                        context, "${rank.label}を獲得（修理ポイント +$pt）", Toast.LENGTH_SHORT
+                    ).show()
                 }
             }
-            delay(2000)
         }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
+
         Column(
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(12.dp)
-                .background(Color(0xCCFFFFFF))
+                .padding(10.dp)
+                .background(Color(0xE6FFFFFF))
                 .padding(10.dp)
         ) {
-            Text("周辺アイテム: ${spawnCount}個", fontSize = 14.sp)
-            Text(nearestText, fontSize = 14.sp)
-            Text("所持: ${itemCount}個", fontSize = 14.sp)
-            if (sessionId != null) {
-                Text(
-                    "記録中: ${sessionSteps}歩 / ${sessionDistance.toInt()}m",
-                    fontSize = 14.sp
-                )
-                Text(
-                    "速度 ${SpeedFormat.kmh(currentSpeed)} (${SpeedFormat.label(currentSpeed)})",
-                    fontSize = 14.sp
-                )
-                Text(
-                    "ペース ${SpeedFormat.pace(currentSpeed)} / 平均 ${SpeedFormat.kmh(avgSpeed)}",
-                    fontSize = 14.sp
-                )
-                if (bonusLevel > 0) {
-                    Text("歩数ボーナス +${bonusLevel}", fontSize = 14.sp)
-                }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Image(painterResource(state.icon), null, Modifier.size(22.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(state.label, fontSize = 14.sp)
             }
+            Text(
+                SpeedFormat.kmh(speed) + "  " + SpeedFormat.pace(speed) +
+                        (if (source == "STEP_ESTIMATE") "  (歩数推定)" else ""),
+                fontSize = 13.sp
+            )
+            shoeType?.let { Text("靴の適正 ${it.rangeLabel}", fontSize = 12.sp) }
+            if (state == SpeedState.GRACE) {
+                Text("あと${graceLeft}秒で連続が途切れます", fontSize = 13.sp, color = Color(0xFFB00020))
+            }
+            Text(
+                "有効時間 ${SpeedFormat.clock(validSec)} / 連続 ${SpeedFormat.clock(continuousSec)}",
+                fontSize = 13.sp
+            )
+            val need = (wear.thresholdSec - continuousSec).coerceAtLeast(0)
+            Text("次の${wear.rank.label}まで ${SpeedFormat.clock(need)}", fontSize = 13.sp)
+            LinearProgressIndicator(
+                progress = { (continuousSec.toFloat() / wear.thresholdSec).coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().height(6.dp)
+            )
+            Text("本日 $earned / $cap pt", fontSize = 13.sp)
+            Text("${distance.toInt()}m ${steps}歩", fontSize = 12.sp)
         }
+
         Column(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(16.dp),
+            modifier = Modifier.align(Alignment.BottomEnd).padding(14.dp),
             horizontalAlignment = Alignment.End
         ) {
-            Button(
-                onClick = {
-                    scope.launch {
-                        val current = sessionId
-                        if (current == null) {
-                            tracker.start()
-                            val now = System.currentTimeMillis()
-                            val id = db.dao().insertSession(WalkSessionEntity(startAt = now))
-                            sessionId = id
-                            sessionSteps = 0
-                            sessionDistance = 0.0
-                            val msg = if (tracker.hasStepSensor()) {
-                                "記録を開始しました"
-                            } else {
-                                "記録を開始（歩数センサーなし・距離のみ）"
-                            }
-                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                        } else {
-                            val saved = db.dao().sessionById(current)
-                            if (saved != null) {
+            Button(onClick = {
+                scope.launch {
+                    if (!running) {
+                        val s = db.dao().equippedShoe()
+                        if (s == null || s.durability <= 0) {
+                            Toast.makeText(
+                                context, "使える靴がありません。装備画面で修理してください", Toast.LENGTH_LONG
+                            ).show()
+                            return@launch
+                        }
+                        engine.start(ShoeType.valueOf(s.shoeType), wear, Balance.DEFAULT_STRIDE_M)
+                        sessionId = db.dao().insertSession(
+                            WalkSessionEntity(
+                                startAt = System.currentTimeMillis(),
+                                shoeType = s.shoeType,
+                                wearType = wear.name
+                            )
+                        )
+                        running = true
+                        Toast.makeText(
+                            context,
+                            if (engine.hasStepSensor()) "記録を開始しました" else "記録を開始（歩数センサーなし）",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    } else {
+                        running = false
+                        engine.stop()
+                        sessionId?.let { sid ->
+                            db.dao().sessionById(sid)?.let { s ->
                                 db.dao().updateSession(
-                                    saved.copy(
+                                    s.copy(
                                         endAt = System.currentTimeMillis(),
-                                        steps = tracker.steps,
-                                        distanceM = tracker.distanceM,
-                                        trackJson = tracker.trackJson(),
-                                        invalidSegments = tracker.invalidSegments,
-                                        itemCount = tracker.itemCount
+                                        validSec = engine.validSec,
+                                        distanceM = engine.distanceM,
+                                        steps = engine.steps,
+                                        routeJson = engine.routeJson(),
+                                        durabilityUsed = engine.durabilityConsumed
                                     )
                                 )
                             }
-                            tracker.stop()
-                            Toast.makeText(
-                                context,
-                                "記録を終了: ${tracker.steps}歩 / ${tracker.distanceM.toInt()}m / ${tracker.itemCount}個",
-                                Toast.LENGTH_LONG
-                            ).show()
-                            sessionId = null
                         }
+                        db.dao().equippedShoe()?.let { s ->
+                            db.dao().updateShoe(
+                                s.copy(
+                                    durability = (s.durability - engine.durabilityConsumed)
+                                        .coerceAtLeast(0),
+                                    totalValidSec = s.totalValidSec + engine.validSec
+                                )
+                            )
+                        }
+                        val q = db.dao().quotaOf(todayKey()) ?: DailyQuotaEntity(todayKey())
+                        val total = q.validSec + engine.validSec
+                        var streak = q.streakDays
+                        var achieved = q.achieved
+                        if (!achieved && total >= Balance.STREAK_GOAL_SEC) {
+                            achieved = true
+                            streak = q.streakDays + 1
+                        }
+                        db.dao().saveQuota(
+                            q.copy(validSec = total, achieved = achieved, streakDays = streak)
+                        )
+                        Toast.makeText(
+                            context,
+                            "終了: 有効 ${SpeedFormat.clock(engine.validSec)} / 耐久 -${engine.durabilityConsumed}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        sessionId = null
                     }
                 }
-            ) { Text(if (sessionId == null) "記録開始" else "記録終了") }
-            Row(
-                modifier = Modifier.padding(top = 8.dp),
-                horizontalArrangement = Arrangement.End
-            ) {
-                Button(onClick = onOpenZukan) { Text("図鑑") }
-                Button(
-                    onClick = onOpenHistory,
-                    modifier = Modifier.padding(start = 8.dp)
-                ) { Text("履歴") }
-                Button(
-                    onClick = onOpenInventory,
-                    modifier = Modifier.padding(start = 8.dp)
-                ) { Text("持ち物") }
-                Button(
-                    onClick = {
-                        locationOverlay.enableFollowLocation()
-                        locationOverlay.myLocation?.let { mapView.controller.animateTo(it) }
-                    },
-                    modifier = Modifier.padding(start = 8.dp)
-                ) { Text("現在地") }
+            }) { Text(if (running) "ストップ" else "スタート") }
+
+            Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
+                OutlinedButton(onClick = onEquip) { Text("装備") }
+                OutlinedButton(onClick = onBag, modifier = Modifier.padding(start = 6.dp)) { Text("持ち物") }
+                OutlinedButton(onClick = onHistory, modifier = Modifier.padding(start = 6.dp)) { Text("履歴") }
             }
         }
     }
 }
 
 @Composable
-fun InventoryScreen(onBack: () -> Unit) {
+fun EquipScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val db = remember { WalkDatabase.get(context) }
+    val shoes by db.dao().observeShoes().collectAsState(initial = emptyList())
+    val loadout by db.dao().observeLoadout().collectAsState(initial = null)
+    var repairTarget by remember { mutableStateOf<String?>(null) }
+    var repairAmount by remember { mutableStateOf(0f) }
+
+    val wallet = loadout?.repairWallet ?: 0
+
+    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Button(onClick = onBack) { Text("戻る") }
+            Text("  装備", fontSize = 18.sp, modifier = Modifier.padding(start = 6.dp))
+        }
+        Row(modifier = Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Image(painterResource(R.drawable.icon_wallet), null, Modifier.size(24.dp))
+            Text("  修理ポイント $wallet", fontSize = 15.sp)
+        }
+
+        LazyColumn(modifier = Modifier.padding(top = 10.dp)) {
+            item { Text("靴", fontSize = 15.sp, modifier = Modifier.padding(vertical = 6.dp)) }
+            items(shoes) { s: ShoeEntity ->
+                val t = ShoeType.valueOf(s.shoeType)
+                Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Image(
+                                painterResource(t.artFor(s.durability)), null,
+                                Modifier.size(84.dp), contentScale = ContentScale.Fit
+                            )
+                            Column(modifier = Modifier.padding(start = 10.dp)) {
+                                Text(t.label + (if (s.equipped) "（装備中）" else ""), fontSize = 15.sp)
+                                Text("適正 ${t.rangeLabel}", fontSize = 12.sp)
+                                Text("耐久 ${s.durability} / ${Balance.DURABILITY_MAX}", fontSize = 12.sp)
+                                LinearProgressIndicator(
+                                    progress = { s.durability / 100f },
+                                    modifier = Modifier.width(150.dp).height(6.dp)
+                                )
+                            }
+                        }
+                        Row(modifier = Modifier.padding(top = 6.dp)) {
+                            if (!s.equipped) {
+                                OutlinedButton(onClick = {
+                                    scope.launch {
+                                        if (s.durability <= 0) {
+                                            Toast.makeText(
+                                                context, "耐久が0の靴は装備できません", Toast.LENGTH_SHORT
+                                            ).show()
+                                        } else {
+                                            db.dao().unequipAll()
+                                            db.dao().equip(s.uuid)
+                                        }
+                                    }
+                                }) { Text("履き替える") }
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    repairTarget = if (repairTarget == s.uuid) null else s.uuid
+                                    repairAmount = 0f
+                                },
+                                modifier = Modifier.padding(start = 6.dp)
+                            ) { Text("修理") }
+                        }
+                        if (repairTarget == s.uuid) {
+                            val maxAdd = minOf(wallet, Balance.DURABILITY_MAX - s.durability)
+                            if (maxAdd <= 0) {
+                                Text("修理できません（ポイント不足か耐久が満タン）", fontSize = 12.sp)
+                            } else {
+                                Text("投入 ${repairAmount.toInt()} / 最大 $maxAdd", fontSize = 13.sp)
+                                Slider(
+                                    value = repairAmount,
+                                    onValueChange = { repairAmount = it },
+                                    valueRange = 0f..maxAdd.toFloat()
+                                )
+                                Button(onClick = {
+                                    val amt = repairAmount.toInt()
+                                    if (amt > 0) scope.launch {
+                                        db.dao().updateShoe(s.copy(durability = s.durability + amt))
+                                        db.dao().loadout()?.let { lo ->
+                                            db.dao().saveLoadout(
+                                                lo.copy(repairWallet = lo.repairWallet - amt)
+                                            )
+                                        }
+                                        db.dao().insertEvent(
+                                            AssetEventEntity(
+                                                assetUuid = null, kind = "REPAIR",
+                                                at = System.currentTimeMillis(),
+                                                detail = "${t.name}+$amt"
+                                            )
+                                        )
+                                        repairTarget = null
+                                    }
+                                }) { Text("修理する") }
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Text("トレーニングウェア", fontSize = 15.sp, modifier = Modifier.padding(vertical = 6.dp))
+            }
+            items(WearType.values().toList()) { w ->
+                val girl = loadout?.avatarGirl ?: false
+                val current = loadout?.wearType == w.name
+                Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Image(
+                            painterResource(w.art(girl)), null,
+                            Modifier.size(96.dp), contentScale = ContentScale.Fit
+                        )
+                        Column(modifier = Modifier.padding(start = 10.dp)) {
+                            Text(w.label + (if (current) "（着用中）" else ""), fontSize = 15.sp)
+                            Text("${w.thresholdMin}分ごとに ${w.rank.label}", fontSize = 12.sp)
+                            Text("修理 ${w.rank.minPoint}〜${w.rank.maxPoint}pt", fontSize = 12.sp)
+                            if (!current) {
+                                OutlinedButton(onClick = {
+                                    scope.launch {
+                                        db.dao().loadout()?.let { lo ->
+                                            db.dao().saveLoadout(lo.copy(wearType = w.name))
+                                        }
+                                    }
+                                }) { Text("着替える") }
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            db.dao().loadout()?.let { lo ->
+                                db.dao().saveLoadout(lo.copy(avatarGirl = !lo.avatarGirl))
+                            }
+                        }
+                    },
+                    modifier = Modifier.padding(top = 4.dp)
+                ) { Text("キャラクターを切り替える") }
+            }
+        }
+    }
+}
+
+@Composable
+fun BagScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val db = remember { WalkDatabase.get(context) }
@@ -429,55 +563,62 @@ fun InventoryScreen(onBack: () -> Unit) {
     val fmt = remember { SimpleDateFormat("MM/dd HH:mm", Locale.JAPAN) }
 
     Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Button(onClick = onBack) { Text("戻る") }
-            Text(
-                "  持ち物 ${assets.size}個",
-                fontSize = 18.sp,
-                modifier = Modifier.padding(start = 8.dp)
-            )
+            Text("  持ち物 ${assets.size}個", fontSize = 18.sp, modifier = Modifier.padding(start = 6.dp))
         }
-        Button(
+        OutlinedButton(
             onClick = {
                 scope.launch {
                     val json = AssetMetadata.exportAll(db.dao().allAssets())
-                    val intent = Intent(Intent.ACTION_SEND).apply {
+                    val i = Intent(Intent.ACTION_SEND).apply {
                         type = "application/json"
                         putExtra(Intent.EXTRA_SUBJECT, "WalkNApp assets")
                         putExtra(Intent.EXTRA_TEXT, json)
                     }
-                    context.startActivity(Intent.createChooser(intent, "資産データを書き出す"))
+                    context.startActivity(Intent.createChooser(i, "資産データを書き出す"))
                 }
             },
-            modifier = Modifier.padding(top = 8.dp)
+            modifier = Modifier.padding(top = 6.dp)
         ) { Text("資産データを書き出す (JSON)") }
 
         if (assets.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("まだ何も拾っていません")
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Image(
+                        painterResource(R.drawable.state_empty_boy), null,
+                        Modifier.size(220.dp), contentScale = ContentScale.Fit
+                    )
+                    Text("まだ何も手に入れていません")
+                }
             }
         } else {
-            LazyColumn(modifier = Modifier.padding(top = 12.dp)) {
-                items(assets) { asset: AssetEntity ->
-                    val def = ItemCatalog.byId(asset.itemDefId)
+            LazyColumn(modifier = Modifier.padding(top = 10.dp)) {
+                items(assets) { a: AssetEntity ->
+                    val rank = runCatching { ItemRank.valueOf(a.rank) }.getOrNull()
                     Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(
-                                "${def?.name ?: asset.itemDefId}  [${def?.rarity?.label ?: "-"}]",
-                                fontSize = 16.sp
-                            )
-                            Text("状態: ${asset.status}", fontSize = 12.sp)
-                            Text(
-                                "取得: ${fmt.format(Date(asset.acquiredAt))}",
-                                fontSize = 12.sp
-                            )
-                            Text(
-                                "地点: ${"%.5f".format(asset.acquiredLat)}, ${"%.5f".format(asset.acquiredLng)}",
-                                fontSize = 12.sp
-                            )
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            rank?.let {
+                                Image(
+                                    painterResource(it.drawable), null,
+                                    Modifier.size(64.dp), contentScale = ContentScale.Fit
+                                )
+                            }
+                            Column(modifier = Modifier.padding(start = 10.dp)) {
+                                Text(
+                                    "${rank?.label ?: a.rank}  修理 +${a.repairPoint}pt",
+                                    fontSize = 15.sp
+                                )
+                                Text(fmt.format(Date(a.acquiredAt)), fontSize = 12.sp)
+                                Text(
+                                    "連続 ${SpeedFormat.clock(a.validSecAtGrant)} / ${SpeedFormat.kmh(a.avgSpeedKmh)}",
+                                    fontSize = 12.sp
+                                )
+                                Text("${a.shoeType} / ${a.wearType} / ${a.speedSource}", fontSize = 11.sp)
+                            }
                         }
                     }
                 }
@@ -491,100 +632,48 @@ fun HistoryScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val db = remember { WalkDatabase.get(context) }
     val sessions by db.dao().observeSessions().collectAsState(initial = emptyList())
+    val quota by db.dao().observeQuota(todayKey()).collectAsState(initial = null)
     val fmt = remember { SimpleDateFormat("MM/dd HH:mm", Locale.JAPAN) }
 
     Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Button(onClick = onBack) { Text("戻る") }
-            Text("  履歴 ${sessions.size}件", fontSize = 18.sp, modifier = Modifier.padding(start = 8.dp))
+            Text("  履歴 ${sessions.size}件", fontSize = 18.sp, modifier = Modifier.padding(start = 6.dp))
+        }
+        Card(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+            Row(
+                modifier = Modifier.padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Image(painterResource(R.drawable.icon_streak), null, Modifier.size(30.dp))
+                Column(modifier = Modifier.padding(start = 8.dp)) {
+                    Text("連続 ${quota?.streakDays ?: 0}日", fontSize = 15.sp)
+                    Text(
+                        "本日の有効時間 ${SpeedFormat.clock(quota?.validSec ?: 0)} / 目標 60:00",
+                        fontSize = 12.sp
+                    )
+                }
+            }
         }
         if (sessions.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("まだ記録がありません")
             }
         } else {
-            LazyColumn(modifier = Modifier.padding(top = 12.dp)) {
+            LazyColumn(modifier = Modifier.padding(top = 10.dp)) {
                 items(sessions) { s: WalkSessionEntity ->
                     Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(fmt.format(Date(s.startAt)), fontSize = 16.sp)
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(fmt.format(Date(s.startAt)), fontSize = 15.sp)
                             Text(
-                                if (s.endAt == null) "記録中" else "${s.steps}歩 / ${s.distanceM.toInt()}m / ${s.itemCount}個",
-                                fontSize = 14.sp
+                                if (s.endAt == null) "記録中"
+                                else "有効 ${SpeedFormat.clock(s.validSec)} / ${s.distanceM.toInt()}m / ${s.steps}歩",
+                                fontSize = 13.sp
                             )
-                            if (s.endAt != null) {
-                                val sec = (s.endAt - s.startAt) / 1000.0
-                                val avg = if (sec > 0) s.distanceM / sec else 0.0
-                                val min = (sec / 60).toInt()
-                                Text(
-                                    "${min}分 / 平均 ${SpeedFormat.kmh(avg)} / ${SpeedFormat.pace(avg)}",
-                                    fontSize = 12.sp
-                                )
-                            }
-                            if (s.invalidSegments > 0) {
-                                Text("除外区間: ${s.invalidSegments}", fontSize = 12.sp)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun ZukanScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
-    val db = remember { WalkDatabase.get(context) }
-    val collected by db.dao().observeCollected().collectAsState(initial = emptyList())
-    val totalSteps by db.dao().observeTotalSteps().collectAsState(initial = 0)
-    val totalDistance by db.dao().observeTotalDistance().collectAsState(initial = 0.0)
-
-    val counts: Map<String, Int> = collected.associate { c: CollectedCount -> c.itemDefId to c.count }
-    val discovered = ItemCatalog.all.count { counts.containsKey(it.id) }
-
-    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Button(onClick = onBack) { Text("戻る") }
-            Text(
-                "  図鑑 ${discovered}/${ItemCatalog.all.size}",
-                fontSize = 18.sp,
-                modifier = Modifier.padding(start = 8.dp)
-            )
-        }
-        Card(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text("総歩数 ${totalSteps}歩 / 総距離 ${totalDistance.toInt()}m", fontSize = 14.sp)
-                val byRarity = Rarity.values().joinToString("  ") { r ->
-                    val n = ItemCatalog.all.filter { it.rarity == r }.sumOf { counts[it.id] ?: 0 }
-                    "${r.label}:${n}"
-                }
-                Text(byRarity, fontSize = 12.sp)
-            }
-        }
-        LazyColumn(modifier = Modifier.padding(top = 12.dp)) {
-            items(ItemCatalog.all) { def ->
-                val n = counts[def.id] ?: 0
-                Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        if (n > 0) {
-                            Text("${def.name}  [${def.rarity.label}]  x${n}", fontSize = 16.sp)
                             Text(
-                                "分類: ${def.category.name} / NFT化: ${def.mintPolicy.name}",
-                                fontSize = 12.sp
+                                "耐久 -${s.durabilityUsed} / ${s.shoeType} / ${s.wearType}",
+                                fontSize = 11.sp
                             )
-                            if (def.capabilities.isNotEmpty()) {
-                                Text("用途: ${def.capabilities.joinToString(", ")}", fontSize = 12.sp)
-                            }
-                        } else {
-                            Text("？？？  [${def.rarity.label}]", fontSize = 16.sp)
-                            Text("未発見", fontSize = 12.sp)
                         }
                     }
                 }

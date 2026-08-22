@@ -1,6 +1,26 @@
 # HANDOFF — WalkNApp
 
 ## 現在地
+- v2.0: 装備型ウォーキングアプリへ全面刷新（WALKNAPP_ONTOLOGY_v2.md 準拠）
+  - **廃止**: spawn パッケージ（SpawnEngine / ItemCatalog / 決定論スポーン）、地図マーカー、タップ取得、歩数ボーナス、SessionTracker
+  - **中核**: game/WalkEngine.kt が速度ゲート・有効時間・連続時間・耐久消費・付与判定を一括で持つ
+  - 靴3種（ストローラー2.0-4.5 / ウォーカー4.0-7.0 / スピードウォーカー6.0-9.5 km/h）を初期配布。初期装備はウォーカー
+  - ウェア3種（軽装5分=低 / 標準15分=中 / 本格30分=高）。セッション中の変更は不可
+  - 速度帯を外れると連続時間リセット。ただし60秒の猶予(GRACE)あり
+  - 耐久は有効時間5分ごとに-1、最大100。0で装備不可
+  - 日次上限 18pt + 連続日数×2（最大+10）。上限超過は OVERFLOW イベントとして記録のみ
+  - 修理は手動。獲得ポイントは RepairWallet に貯まり、装備画面でスライダー投入
+  - GPS不良時は歩数センサー×歩幅0.70mで速度推定（連続10分上限）。屋内判定は直近5分の移動50m未満
+  - Room version 4（shoe / loadout / asset / walk_session / daily_quota / asset_event）
+  - 画像素材29枚を res/drawable-nodpi に配置（透過PNG）
+  - 画面: ウォーク（地図＋軌跡＋状態パネル）/ 装備 / 持ち物 / 履歴
+
+## 未実装（次バージョン以降）
+- 図鑑・統計画面
+- StrideProfile の永続化（現状は毎回 0.70m 固定。WalkEngine.learnedStride() は用意済み）
+- フォアグラウンドサービス化（画面を消すと記録が止まる）
+- Phase 2（ウォレット・cNFTミント・QR交換・マーケット）
+
 - v1.3: 納品規約への準拠
   - build.yml を削除。CI は release.yml（タグ起動）のみに一本化
   - deploy.sh に rm -f .github/workflows/build.yml と git rm --cached を追加（unzip -o は端末の旧ファイルを消さないため）

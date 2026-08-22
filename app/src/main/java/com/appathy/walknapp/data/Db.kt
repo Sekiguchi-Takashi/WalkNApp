@@ -16,26 +16,41 @@ import kotlinx.coroutines.flow.Flow
 
 enum class AssetStatus { INTERNAL, PENDING_MINT, MINTED, EXPORTED }
 
+@Entity(tableName = "shoe")
+data class ShoeEntity(
+    @PrimaryKey val uuid: String,
+    @ColumnInfo(name = "shoe_type") val shoeType: String,
+    @ColumnInfo(name = "durability") val durability: Int,
+    @ColumnInfo(name = "equipped") val equipped: Boolean,
+    @ColumnInfo(name = "total_valid_sec") val totalValidSec: Long = 0
+)
+
+@Entity(tableName = "loadout")
+data class LoadoutEntity(
+    @PrimaryKey val id: Int = 1,
+    @ColumnInfo(name = "wear_type") val wearType: String,
+    @ColumnInfo(name = "avatar_girl") val avatarGirl: Boolean = false,
+    @ColumnInfo(name = "repair_wallet") val repairWallet: Int = 0
+)
+
 @Entity(tableName = "asset")
 data class AssetEntity(
     @PrimaryKey val uuid: String,
-    @ColumnInfo(name = "item_def_id") val itemDefId: String,
-    @ColumnInfo(name = "collection_id") val collectionId: String,
+    @ColumnInfo(name = "rank") val rank: String,
+    @ColumnInfo(name = "repair_point") val repairPoint: Int,
     @ColumnInfo(name = "acquired_at") val acquiredAt: Long,
     @ColumnInfo(name = "acquired_lat") val acquiredLat: Double,
     @ColumnInfo(name = "acquired_lng") val acquiredLng: Double,
-    @ColumnInfo(name = "acquired_steps") val acquiredSteps: Int = 0,
-    @ColumnInfo(name = "spawn_id") val spawnId: String,
+    @ColumnInfo(name = "valid_sec_at_grant") val validSecAtGrant: Long,
+    @ColumnInfo(name = "avg_speed_kmh") val avgSpeedKmh: Double,
+    @ColumnInfo(name = "shoe_type") val shoeType: String,
+    @ColumnInfo(name = "wear_type") val wearType: String,
+    @ColumnInfo(name = "speed_source") val speedSource: String,
+    @ColumnInfo(name = "session_id") val sessionId: Long,
     @ColumnInfo(name = "status") val status: String = AssetStatus.INTERNAL.name,
     @ColumnInfo(name = "owner_ref") val ownerRef: String? = null,
     @ColumnInfo(name = "chain_ref") val chainRef: String? = null,
     @ColumnInfo(name = "metadata_uri") val metadataUri: String? = null
-)
-
-@Entity(tableName = "acquired_spawn")
-data class AcquiredSpawnEntity(
-    @PrimaryKey val spawnId: String,
-    @ColumnInfo(name = "acquired_at") val acquiredAt: Long
 )
 
 @Entity(tableName = "walk_session")
@@ -43,40 +58,72 @@ data class WalkSessionEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     @ColumnInfo(name = "start_at") val startAt: Long,
     @ColumnInfo(name = "end_at") val endAt: Long? = null,
-    @ColumnInfo(name = "steps") val steps: Int = 0,
+    @ColumnInfo(name = "shoe_type") val shoeType: String,
+    @ColumnInfo(name = "wear_type") val wearType: String,
+    @ColumnInfo(name = "valid_sec") val validSec: Long = 0,
     @ColumnInfo(name = "distance_m") val distanceM: Double = 0.0,
-    @ColumnInfo(name = "track_json") val trackJson: String = "[]",
-    @ColumnInfo(name = "invalid_segments") val invalidSegments: Int = 0,
-    @ColumnInfo(name = "item_count") val itemCount: Int = 0
+    @ColumnInfo(name = "steps") val steps: Int = 0,
+    @ColumnInfo(name = "route_json") val routeJson: String = "[]",
+    @ColumnInfo(name = "grants") val grants: Int = 0,
+    @ColumnInfo(name = "durability_used") val durabilityUsed: Int = 0
+)
+
+@Entity(tableName = "daily_quota")
+data class DailyQuotaEntity(
+    @PrimaryKey val date: String,
+    @ColumnInfo(name = "earned_points") val earnedPoints: Int = 0,
+    @ColumnInfo(name = "valid_sec") val validSec: Long = 0,
+    @ColumnInfo(name = "streak_days") val streakDays: Int = 0,
+    @ColumnInfo(name = "achieved") val achieved: Boolean = false
 )
 
 @Entity(tableName = "asset_event")
 data class AssetEventEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    @ColumnInfo(name = "asset_uuid") val assetUuid: String,
+    @ColumnInfo(name = "asset_uuid") val assetUuid: String?,
     @ColumnInfo(name = "kind") val kind: String,
     @ColumnInfo(name = "at") val at: Long,
     @ColumnInfo(name = "detail") val detail: String? = null
 )
 
-data class CollectedCount(
-    @ColumnInfo(name = "item_def_id") val itemDefId: String,
-    @ColumnInfo(name = "cnt") val count: Int
-)
-
 @Dao
 interface WalkDao {
+
+    @Query("SELECT * FROM shoe")
+    fun observeShoes(): Flow<List<ShoeEntity>>
+
+    @Query("SELECT * FROM shoe")
+    suspend fun allShoes(): List<ShoeEntity>
+
+    @Query("SELECT * FROM shoe WHERE equipped = 1 LIMIT 1")
+    suspend fun equippedShoe(): ShoeEntity?
+
+    @Query("SELECT * FROM shoe WHERE equipped = 1 LIMIT 1")
+    fun observeEquippedShoe(): Flow<ShoeEntity?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertShoe(shoe: ShoeEntity)
+
+    @Update
+    suspend fun updateShoe(shoe: ShoeEntity)
+
+    @Query("UPDATE shoe SET equipped = 0")
+    suspend fun unequipAll()
+
+    @Query("UPDATE shoe SET equipped = 1 WHERE uuid = :uuid")
+    suspend fun equip(uuid: String)
+
+    @Query("SELECT * FROM loadout WHERE id = 1")
+    suspend fun loadout(): LoadoutEntity?
+
+    @Query("SELECT * FROM loadout WHERE id = 1")
+    fun observeLoadout(): Flow<LoadoutEntity?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun saveLoadout(loadout: LoadoutEntity)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAsset(asset: AssetEntity)
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertAcquiredSpawn(spawn: AcquiredSpawnEntity)
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertEvent(event: AssetEventEntity)
-
-    @Query("SELECT spawnId FROM acquired_spawn")
-    suspend fun acquiredSpawnIds(): List<String>
 
     @Query("SELECT * FROM asset ORDER BY acquired_at DESC")
     fun observeAssets(): Flow<List<AssetEntity>>
@@ -87,39 +134,44 @@ interface WalkDao {
     @Query("SELECT COUNT(*) FROM asset")
     fun observeAssetCount(): Flow<Int>
 
-    @Query("UPDATE asset SET status = :status WHERE uuid = :uuid")
-    suspend fun updateStatus(uuid: String, status: String)
-
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSession(session: WalkSessionEntity): Long
 
     @Update
     suspend fun updateSession(session: WalkSessionEntity)
 
-    @Query("SELECT * FROM walk_session ORDER BY start_at DESC")
-    fun observeSessions(): Flow<List<WalkSessionEntity>>
-
     @Query("SELECT * FROM walk_session WHERE id = :id")
     suspend fun sessionById(id: Long): WalkSessionEntity?
 
-    @Query("SELECT item_def_id, COUNT(*) AS cnt FROM asset GROUP BY item_def_id")
-    fun observeCollected(): Flow<List<CollectedCount>>
+    @Query("SELECT * FROM walk_session ORDER BY start_at DESC")
+    fun observeSessions(): Flow<List<WalkSessionEntity>>
 
-    @Query("SELECT IFNULL(SUM(steps),0) FROM walk_session")
-    fun observeTotalSteps(): Flow<Int>
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun saveQuota(quota: DailyQuotaEntity)
 
-    @Query("SELECT IFNULL(SUM(distance_m),0) FROM walk_session")
-    fun observeTotalDistance(): Flow<Double>
+    @Query("SELECT * FROM daily_quota WHERE date = :date")
+    suspend fun quotaOf(date: String): DailyQuotaEntity?
+
+    @Query("SELECT * FROM daily_quota WHERE date = :date")
+    fun observeQuota(date: String): Flow<DailyQuotaEntity?>
+
+    @Query("SELECT * FROM daily_quota ORDER BY date DESC LIMIT 30")
+    suspend fun recentQuotas(): List<DailyQuotaEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertEvent(event: AssetEventEntity)
 }
 
 @Database(
     entities = [
+        ShoeEntity::class,
+        LoadoutEntity::class,
         AssetEntity::class,
-        AcquiredSpawnEntity::class,
-        AssetEventEntity::class,
-        WalkSessionEntity::class
+        WalkSessionEntity::class,
+        DailyQuotaEntity::class,
+        AssetEventEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class WalkDatabase : RoomDatabase() {

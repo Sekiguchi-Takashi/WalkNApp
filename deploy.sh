@@ -7,7 +7,12 @@ if [ ! -d .git ]; then git init -b main; fi
 git remote remove origin 2>/dev/null
 git remote add origin "https://${GHUSER}:${TOKEN}@github.com/${GHUSER}/${REPO}.git"
 rm -f .github/workflows/build.yml
+rm -f app/src/main/java/com/appathy/walknapp/spawn/Items.kt
+rm -f app/src/main/java/com/appathy/walknapp/spawn/SpawnEngine.kt
+rm -f app/src/main/java/com/appathy/walknapp/session/SessionTracker.kt
 git rm --cached -q .github/workflows/build.yml 2>/dev/null
+git rm -r --cached -q app/src/main/java/com/appathy/walknapp/spawn 2>/dev/null
+git rm --cached -q app/src/main/java/com/appathy/walknapp/session/SessionTracker.kt 2>/dev/null
 git add -A
 git commit -m "${1:-update}"
 git pull --rebase origin main
