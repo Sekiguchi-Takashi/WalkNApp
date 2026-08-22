@@ -1,6 +1,16 @@
 # HANDOFF — WalkNApp
 
 ## 現在地
+- v2.1: フォアグラウンドサービス化＋歩幅学習
+  - service/WalkService.kt を追加。画面を消しても記録が続く。通知に速度・有効時間・連続時間を表示し、獲得時は別通知
+  - 位置取得を osmdroid のオーバーレイから FusedLocationProvider に変更（3秒 / 3m 間隔）
+  - game/WalkRuntime.kt がサービスと UI の橋渡し（StateFlow）。UI 側は購読するだけで計測ロジックを持たない
+  - 付与・耐久消費・日次上限・連続日数の更新はすべてサービス側で実行
+  - 歩幅を学習して LoadoutEntity.stride_m に保存（GPS良好なセッションのみ、旧値7:新値3で加重平均）
+  - Room version 5（loadout に stride_m を追加）
+  - 権限追加: FOREGROUND_SERVICE / FOREGROUND_SERVICE_LOCATION / POST_NOTIFICATIONS / WAKE_LOCK
+
+
 - v2.0: 装備型ウォーキングアプリへ全面刷新（WALKNAPP_ONTOLOGY_v2.md 準拠）
   - **廃止**: spawn パッケージ（SpawnEngine / ItemCatalog / 決定論スポーン）、地図マーカー、タップ取得、歩数ボーナス、SessionTracker
   - **中核**: game/WalkEngine.kt が速度ゲート・有効時間・連続時間・耐久消費・付与判定を一括で持つ

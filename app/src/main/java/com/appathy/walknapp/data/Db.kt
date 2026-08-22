@@ -30,7 +30,8 @@ data class LoadoutEntity(
     @PrimaryKey val id: Int = 1,
     @ColumnInfo(name = "wear_type") val wearType: String,
     @ColumnInfo(name = "avatar_girl") val avatarGirl: Boolean = false,
-    @ColumnInfo(name = "repair_wallet") val repairWallet: Int = 0
+    @ColumnInfo(name = "repair_wallet") val repairWallet: Int = 0,
+    @ColumnInfo(name = "stride_m") val strideM: Double = 0.70
 )
 
 @Entity(tableName = "asset")
@@ -171,7 +172,7 @@ interface WalkDao {
         DailyQuotaEntity::class,
         AssetEventEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class WalkDatabase : RoomDatabase() {

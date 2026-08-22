@@ -54,7 +54,6 @@ import androidx.core.content.ContextCompat
 import com.appathy.walknapp.data.AssetEntity
 import com.appathy.walknapp.data.AssetEventEntity
 import com.appathy.walknapp.data.AssetMetadata
-import com.appathy.walknapp.data.AssetStatus
 import com.appathy.walknapp.data.DailyQuotaEntity
 import com.appathy.walknapp.data.LoadoutEntity
 import com.appathy.walknapp.data.ShoeEntity
@@ -64,10 +63,10 @@ import com.appathy.walknapp.game.Balance
 import com.appathy.walknapp.game.ItemRank
 import com.appathy.walknapp.game.ShoeType
 import com.appathy.walknapp.game.SpeedState
-import com.appathy.walknapp.game.WalkEngine
+import com.appathy.walknapp.game.WalkRuntime
 import com.appathy.walknapp.game.WearType
+import com.appathy.walknapp.service.WalkService
 import com.appathy.walknapp.session.SpeedFormat
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
@@ -142,7 +141,8 @@ fun RootScreen() {
                     arrayOf(
                         Manifest.permission.ACCESS_FINE_LOCATION,
                         Manifest.permission.ACCESS_COARSE_LOCATION,
-                        Manifest.permission.ACTIVITY_RECOGNITION
+                        Manifest.permission.ACTIVITY_RECOGNITION,
+                        Manifest.permission.POST_NOTIFICATIONS
                     )
                 )
             }) { Text("位置情報と歩数を許可して開始") }
@@ -166,24 +166,21 @@ fun RootScreen() {
 @Composable
 fun WalkScreen(onEquip: () -> Unit, onBag: () -> Unit, onHistory: () -> Unit) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val db = remember { WalkDatabase.get(context) }
-    val engine = remember { WalkEngine(context) }
 
     val shoe by db.dao().observeEquippedShoe().collectAsState(initial = null)
     val loadout by db.dao().observeLoadout().collectAsState(initial = null)
     val quota by db.dao().observeQuota(todayKey()).collectAsState(initial = null)
 
-    var running by remember { mutableStateOf(false) }
-    var sessionId by remember { mutableStateOf<Long?>(null) }
-    var speed by remember { mutableStateOf(0.0) }
-    var state by remember { mutableStateOf(SpeedState.IDLE) }
-    var validSec by remember { mutableStateOf(0L) }
-    var continuousSec by remember { mutableStateOf(0L) }
-    var distance by remember { mutableStateOf(0.0) }
-    var steps by remember { mutableStateOf(0) }
-    var source by remember { mutableStateOf("GPS") }
-    var graceLeft by remember { mutableStateOf(0L) }
+    val running by WalkRuntime.running.collectAsState()
+    val tick by WalkRuntime.tick.collectAsState()
+    val route by WalkRuntime.route.collectAsState()
+    val notice by WalkRuntime.notice.collectAsState()
+
+    LaunchedEffect(notice) {
+        val msg = WalkRuntime.consumeNotice()
+        if (msg != null) Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+    }
 
     val mapView = remember {
         MapView(context).apply {
@@ -205,6 +202,15 @@ fun WalkScreen(onEquip: () -> Unit, onBag: () -> Unit, onHistory: () -> Unit) {
         }
     }
 
+    LaunchedEffect(Unit) {
+        if (!mapView.overlays.contains(locationOverlay)) mapView.overlays.add(locationOverlay)
+        if (!mapView.overlays.contains(trackLine)) mapView.overlays.add(0, trackLine)
+    }
+    LaunchedEffect(route) {
+        trackLine.setPoints(route.map { GeoPoint(it.lat, it.lng) })
+        mapView.invalidate()
+    }
+
     val wear = WearType.valueOf(loadout?.wearType ?: WearType.STANDARD.name)
     val shoeType = shoe?.let { ShoeType.valueOf(it.shoeType) }
     val cap = Balance.DAILY_CAP_BASE +
@@ -212,74 +218,10 @@ fun WalkScreen(onEquip: () -> Unit, onBag: () -> Unit, onHistory: () -> Unit) {
                 .coerceAtMost(Balance.STREAK_BONUS_MAX)
     val earned = quota?.earnedPoints ?: 0
 
-    LaunchedEffect(Unit) {
-        if (!mapView.overlays.contains(locationOverlay)) mapView.overlays.add(locationOverlay)
-        if (!mapView.overlays.contains(trackLine)) mapView.overlays.add(0, trackLine)
-        var lastAt = System.currentTimeMillis()
-        while (true) {
-            delay(2000)
-            val now = System.currentTimeMillis()
-            val elapsed = ((now - lastAt) / 1000).coerceAtLeast(1)
-            lastAt = now
-            if (!running) continue
-            locationOverlay.myLocation?.let { engine.onLocation(it.latitude, it.longitude, now) }
-            val t = engine.onTick(now, elapsed)
-            speed = t.speedKmh; state = t.state; validSec = t.validSec
-            continuousSec = t.continuousSec; distance = t.distanceM
-            steps = t.steps; source = t.speedSource; graceLeft = t.graceLeftSec
-            trackLine.setPoints(engine.points().map { GeoPoint(it.lat, it.lng) })
-            mapView.invalidate()
-
-            if (t.grantReady) {
-                val sid = sessionId ?: continue
-                val q = db.dao().quotaOf(todayKey()) ?: DailyQuotaEntity(todayKey())
-                if (q.earnedPoints >= cap) {
-                    db.dao().insertEvent(
-                        AssetEventEntity(
-                            assetUuid = null, kind = "OVERFLOW", at = now, detail = "cap=$cap"
-                        )
-                    )
-                    engine.consumeGrant()
-                } else {
-                    val rank = wear.rank
-                    val pt = rank.rollPoint().coerceAtMost(cap - q.earnedPoints)
-                    val here = locationOverlay.myLocation
-                    val uuid = UUID.randomUUID().toString()
-                    db.dao().insertAsset(
-                        AssetEntity(
-                            uuid = uuid,
-                            rank = rank.name,
-                            repairPoint = pt,
-                            acquiredAt = now,
-                            acquiredLat = here?.latitude ?: 0.0,
-                            acquiredLng = here?.longitude ?: 0.0,
-                            validSecAtGrant = t.continuousSec,
-                            avgSpeedKmh = t.speedKmh,
-                            shoeType = shoeType?.name ?: "",
-                            wearType = wear.name,
-                            speedSource = t.speedSource,
-                            sessionId = sid,
-                            status = AssetStatus.INTERNAL.name
-                        )
-                    )
-                    db.dao().insertEvent(
-                        AssetEventEntity(
-                            assetUuid = uuid, kind = "GRANT", at = now,
-                            detail = "${rank.name}+$pt"
-                        )
-                    )
-                    db.dao().loadout()?.let { lo ->
-                        db.dao().saveLoadout(lo.copy(repairWallet = lo.repairWallet + pt))
-                    }
-                    db.dao().saveQuota(q.copy(earnedPoints = q.earnedPoints + pt))
-                    engine.consumeGrant()
-                    Toast.makeText(
-                        context, "${rank.label}を獲得（修理ポイント +$pt）", Toast.LENGTH_SHORT
-                    ).show()
-                }
-            }
-        }
-    }
+    val state = tick?.state ?: SpeedState.IDLE
+    val speed = tick?.speedKmh ?: 0.0
+    val validSec = tick?.validSec ?: 0L
+    val continuousSec = tick?.continuousSec ?: 0L
 
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
@@ -298,12 +240,15 @@ fun WalkScreen(onEquip: () -> Unit, onBag: () -> Unit, onHistory: () -> Unit) {
             }
             Text(
                 SpeedFormat.kmh(speed) + "  " + SpeedFormat.pace(speed) +
-                        (if (source == "STEP_ESTIMATE") "  (歩数推定)" else ""),
+                        (if (tick?.speedSource == "STEP_ESTIMATE") "  (歩数推定)" else ""),
                 fontSize = 13.sp
             )
             shoeType?.let { Text("靴の適正 ${it.rangeLabel}", fontSize = 12.sp) }
             if (state == SpeedState.GRACE) {
-                Text("あと${graceLeft}秒で連続が途切れます", fontSize = 13.sp, color = Color(0xFFB00020))
+                Text(
+                    "あと${tick?.graceLeftSec ?: 0}秒で連続が途切れます",
+                    fontSize = 13.sp, color = Color(0xFFB00020)
+                )
             }
             Text(
                 "有効時間 ${SpeedFormat.clock(validSec)} / 連続 ${SpeedFormat.clock(continuousSec)}",
@@ -316,7 +261,10 @@ fun WalkScreen(onEquip: () -> Unit, onBag: () -> Unit, onHistory: () -> Unit) {
                 modifier = Modifier.fillMaxWidth().height(6.dp)
             )
             Text("本日 $earned / $cap pt", fontSize = 13.sp)
-            Text("${distance.toInt()}m ${steps}歩", fontSize = 12.sp)
+            Text("${(tick?.distanceM ?: 0.0).toInt()}m ${tick?.steps ?: 0}歩", fontSize = 12.sp)
+            if (running) {
+                Text("画面を消しても記録は続きます", fontSize = 11.sp, color = Color(0xFF2E7D32))
+            }
         }
 
         Column(
@@ -324,74 +272,7 @@ fun WalkScreen(onEquip: () -> Unit, onBag: () -> Unit, onHistory: () -> Unit) {
             horizontalAlignment = Alignment.End
         ) {
             Button(onClick = {
-                scope.launch {
-                    if (!running) {
-                        val s = db.dao().equippedShoe()
-                        if (s == null || s.durability <= 0) {
-                            Toast.makeText(
-                                context, "使える靴がありません。装備画面で修理してください", Toast.LENGTH_LONG
-                            ).show()
-                            return@launch
-                        }
-                        engine.start(ShoeType.valueOf(s.shoeType), wear, Balance.DEFAULT_STRIDE_M)
-                        sessionId = db.dao().insertSession(
-                            WalkSessionEntity(
-                                startAt = System.currentTimeMillis(),
-                                shoeType = s.shoeType,
-                                wearType = wear.name
-                            )
-                        )
-                        running = true
-                        Toast.makeText(
-                            context,
-                            if (engine.hasStepSensor()) "記録を開始しました" else "記録を開始（歩数センサーなし）",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    } else {
-                        running = false
-                        engine.stop()
-                        sessionId?.let { sid ->
-                            db.dao().sessionById(sid)?.let { s ->
-                                db.dao().updateSession(
-                                    s.copy(
-                                        endAt = System.currentTimeMillis(),
-                                        validSec = engine.validSec,
-                                        distanceM = engine.distanceM,
-                                        steps = engine.steps,
-                                        routeJson = engine.routeJson(),
-                                        durabilityUsed = engine.durabilityConsumed
-                                    )
-                                )
-                            }
-                        }
-                        db.dao().equippedShoe()?.let { s ->
-                            db.dao().updateShoe(
-                                s.copy(
-                                    durability = (s.durability - engine.durabilityConsumed)
-                                        .coerceAtLeast(0),
-                                    totalValidSec = s.totalValidSec + engine.validSec
-                                )
-                            )
-                        }
-                        val q = db.dao().quotaOf(todayKey()) ?: DailyQuotaEntity(todayKey())
-                        val total = q.validSec + engine.validSec
-                        var streak = q.streakDays
-                        var achieved = q.achieved
-                        if (!achieved && total >= Balance.STREAK_GOAL_SEC) {
-                            achieved = true
-                            streak = q.streakDays + 1
-                        }
-                        db.dao().saveQuota(
-                            q.copy(validSec = total, achieved = achieved, streakDays = streak)
-                        )
-                        Toast.makeText(
-                            context,
-                            "終了: 有効 ${SpeedFormat.clock(engine.validSec)} / 耐久 -${engine.durabilityConsumed}",
-                            Toast.LENGTH_LONG
-                        ).show()
-                        sessionId = null
-                    }
-                }
+                if (running) WalkService.stop(context) else WalkService.start(context)
             }) { Text(if (running) "ストップ" else "スタート") }
 
             Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
