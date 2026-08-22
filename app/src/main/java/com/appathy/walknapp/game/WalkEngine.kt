@@ -81,12 +81,25 @@ class WalkEngine(context: Context) : SensorEventListener {
     // 屋内判定用
     private val moveWindow = mutableListOf<Pair<Double, Long>>()
 
-    var strideM: Double = Balance.DEFAULT_STRIDE_M
+    private var strides: MutableMap<String, Double> = mutableMapOf(
+        "LOW" to 0.62, "MID" to 0.70, "HIGH" to 0.78
+    )
+    private val bandDist = mutableMapOf("LOW" to 0.0, "MID" to 0.0, "HIGH" to 0.0)
+    private val bandSteps = mutableMapOf("LOW" to 0, "MID" to 0, "HIGH" to 0)
+    private var lastBandSteps = 0
 
-    fun start(shoe: ShoeType, wear: WearType, stride: Double) {
+    fun bandOf(cadence: Double): String = when {
+        cadence < 1.6 -> "LOW"
+        cadence < 2.0 -> "MID"
+        else -> "HIGH"
+    }
+
+    fun start(shoe: ShoeType, wear: WearType, strideMap: Map<String, Double>) {
         this.shoe = shoe
         this.wear = wear
-        this.strideM = if (stride > 0.3 && stride < 1.2) stride else Balance.DEFAULT_STRIDE_M
+        strideMap.forEach { (k, v) -> if (v > 0.3 && v < 1.2) strides[k] = v }
+        bandDist.keys.forEach { bandDist[it] = 0.0; bandSteps[it] = 0 }
+        lastBandSteps = 0
         steps = 0; baseSteps = null
         validSec = 0; continuousSec = 0; distanceM = 0.0
         durabilityConsumed = 0; validSecCarry = 0
@@ -191,18 +204,33 @@ class WalkEngine(context: Context) : SensorEventListener {
             speedKmh = if (span > 0) dist / span * 3.6 else 0.0
             speedSource = "GPS"
             stepFallbackSec = 0
+            accumulateBand(now)
             return
         }
         // GPS が不良 or 未取得 → 歩数センサーから推定
         val cadence = cadencePerSec(now)
         if (cadence > 0 && stepFallbackSec < Balance.STEP_ESTIMATE_MAX_SEC) {
-            speedKmh = cadence * strideM * 3.6
+            val stride = strides[bandOf(cadence)] ?: Balance.DEFAULT_STRIDE_M
+            speedKmh = cadence * stride * 3.6
             speedSource = "STEP_ESTIMATE"
             stepFallbackSec += 2
         } else {
             speedKmh = 0.0
             speedSource = if (cadence > 0) "STEP_LIMIT" else "GPS"
         }
+    }
+
+    /** GPSが良好な間だけ、ケイデンス帯ごとに距離と歩数をためて歩幅学習の材料にする */
+    private fun accumulateBand(now: Long) {
+        val cadence = cadencePerSec(now)
+        if (cadence <= 0) return
+        val dSteps = steps - lastBandSteps
+        if (dSteps <= 0) return
+        val b = bandOf(cadence)
+        val dDist = speedKmh / 3.6 * (dSteps / cadence)
+        bandDist[b] = (bandDist[b] ?: 0.0) + dDist
+        bandSteps[b] = (bandSteps[b] ?: 0) + dSteps
+        lastBandSteps = steps
     }
 
     private fun cadencePerSec(now: Long): Double {
@@ -251,10 +279,16 @@ class WalkEngine(context: Context) : SensorEventListener {
         return arr.toString()
     }
 
-    /** GPS良好区間の 距離÷歩数 から歩幅を学習した値を返す（サンプル不足なら null） */
-    fun learnedStride(): Double? {
-        if (steps < 200 || distanceM < 150) return null
-        val s = distanceM / steps
-        return if (s in 0.3..1.2) s else null
+    /** ケイデンス帯ごとの学習歩幅。サンプルが足りない帯は含めない */
+    fun learnedStrides(): Map<String, Double> {
+        val out = mutableMapOf<String, Double>()
+        bandSteps.forEach { (b, st) ->
+            if (st >= 150) {
+                val d = bandDist[b] ?: 0.0
+                val s = d / st
+                if (s in 0.3..1.2) out[b] = s
+            }
+        }
+        return out
     }
 }

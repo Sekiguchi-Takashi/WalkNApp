@@ -113,7 +113,14 @@ class WalkService : Service() {
             }
             val shoe = ShoeType.valueOf(shoeRow.shoeType)
             val wear = WearType.valueOf(loadout.wearType)
-            engine.start(shoe, wear, loadout.strideM)
+            engine.start(
+                shoe, wear,
+                mapOf(
+                    "LOW" to loadout.strideLow,
+                    "MID" to loadout.strideMid,
+                    "HIGH" to loadout.strideHigh
+                )
+            )
 
             val sid = db.dao().insertSession(
                 WalkSessionEntity(
@@ -242,10 +249,19 @@ class WalkService : Service() {
             db.dao().saveQuota(q.copy(validSec = total, achieved = achieved, streakDays = streak))
 
             // 歩幅の学習（GPSが十分に取れたセッションのみ）
-            engine.learnedStride()?.let { s ->
+            val learned = engine.learnedStrides()
+            if (learned.isNotEmpty()) {
                 db.dao().loadout()?.let { lo ->
-                    val blended = if (lo.strideM > 0) (lo.strideM * 0.7 + s * 0.3) else s
-                    db.dao().saveLoadout(lo.copy(strideM = Math.round(blended * 1000.0) / 1000.0))
+                    fun blend(old: Double, new: Double?): Double =
+                        if (new == null) old
+                        else Math.round((old * 0.7 + new * 0.3) * 1000.0) / 1000.0
+                    db.dao().saveLoadout(
+                        lo.copy(
+                            strideLow = blend(lo.strideLow, learned["LOW"]),
+                            strideMid = blend(lo.strideMid, learned["MID"]),
+                            strideHigh = blend(lo.strideHigh, learned["HIGH"])
+                        )
+                    )
                 }
             }
 
@@ -288,6 +304,11 @@ class WalkService : Service() {
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        val stopPi = PendingIntent.getService(
+            this, 1,
+            Intent(this, WalkService::class.java).setAction(ACTION_STOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
@@ -295,6 +316,7 @@ class WalkService : Service() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(pi)
+            .addAction(0, "ストップ", stopPi)
             .build()
     }
 

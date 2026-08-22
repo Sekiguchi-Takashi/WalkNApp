@@ -16,7 +16,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -236,6 +239,7 @@ fun WalkScreen(
         Column(
             modifier = Modifier
                 .align(Alignment.TopStart)
+                .statusBarsPadding()
                 .padding(10.dp)
                 .background(Color(0xE6FFFFFF))
                 .padding(10.dp)
@@ -275,18 +279,21 @@ fun WalkScreen(
         }
 
         Column(
-            modifier = Modifier.align(Alignment.BottomEnd).padding(14.dp),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .navigationBarsPadding()
+                .padding(start = 12.dp, end = 12.dp, bottom = 16.dp),
             horizontalAlignment = Alignment.End
         ) {
             Button(onClick = {
                 if (running) WalkService.stop(context) else WalkService.start(context)
             }) { Text(if (running) "ストップ" else "スタート") }
 
-            Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
-                OutlinedButton(onClick = onEquip) { Text("装備") }
-                OutlinedButton(onClick = onBag, modifier = Modifier.padding(start = 6.dp)) { Text("持ち物") }
-                OutlinedButton(onClick = onHistory, modifier = Modifier.padding(start = 6.dp)) { Text("履歴") }
-                OutlinedButton(onClick = onStats, modifier = Modifier.padding(start = 6.dp)) { Text("記録") }
+            Row(modifier = Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.End) {
+                NavButton("装備", onEquip)
+                NavButton("持ち物", onBag, Modifier.padding(start = 5.dp))
+                NavButton("履歴", onHistory, Modifier.padding(start = 5.dp))
+                NavButton("記録", onStats, Modifier.padding(start = 5.dp))
             }
         }
     }
@@ -304,7 +311,10 @@ fun EquipScreen(onBack: () -> Unit) {
 
     val wallet = loadout?.repairWallet ?: 0
 
-    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+    Column(
+        modifier = Modifier.fillMaxSize().statusBarsPadding()
+            .navigationBarsPadding().padding(12.dp)
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Button(onClick = onBack) { Text("戻る") }
             Text("  装備", fontSize = 18.sp, modifier = Modifier.padding(start = 6.dp))
@@ -451,7 +461,10 @@ fun BagScreen(onBack: () -> Unit) {
     val assets by db.dao().observeAssets().collectAsState(initial = emptyList())
     val fmt = remember { SimpleDateFormat("MM/dd HH:mm", Locale.JAPAN) }
 
-    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+    Column(
+        modifier = Modifier.fillMaxSize().statusBarsPadding()
+            .navigationBarsPadding().padding(12.dp)
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Button(onClick = onBack) { Text("戻る") }
             Text("  持ち物 ${assets.size}個", fontSize = 18.sp, modifier = Modifier.padding(start = 6.dp))
@@ -524,7 +537,10 @@ fun HistoryScreen(onBack: () -> Unit) {
     val quota by db.dao().observeQuota(todayKey()).collectAsState(initial = null)
     val fmt = remember { SimpleDateFormat("MM/dd HH:mm", Locale.JAPAN) }
 
-    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+    Column(
+        modifier = Modifier.fillMaxSize().statusBarsPadding()
+            .navigationBarsPadding().padding(12.dp)
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Button(onClick = onBack) { Text("戻る") }
             Text("  履歴 ${sessions.size}件", fontSize = 18.sp, modifier = Modifier.padding(start = 6.dp))
@@ -568,5 +584,16 @@ fun HistoryScreen(onBack: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+@Composable
+fun NavButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        Text(label, fontSize = 13.sp, maxLines = 1)
     }
 }

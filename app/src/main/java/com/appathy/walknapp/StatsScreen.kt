@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -61,7 +63,10 @@ fun StatsScreen(onBack: () -> Unit) {
     val todayValid = quota?.validSec ?: 0L
     val earned = quota?.earnedPoints ?: 0
 
-    LazyColumn(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().statusBarsPadding()
+            .navigationBarsPadding().padding(12.dp)
+    ) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Button(onClick = onBack) { Text("戻る") }
@@ -190,8 +195,10 @@ fun StatsScreen(onBack: () -> Unit) {
                     Text("距離 ${(totalDistance / 1000).let { String.format("%.2f", it) }} km", fontSize = 13.sp)
                     Text("セッション ${sessionCount}回", fontSize = 13.sp)
                     Text(
-                        "学習した歩幅 ${String.format("%.2f", loadout?.strideM ?: Balance.DEFAULT_STRIDE_M)} m",
-                        fontSize = 13.sp
+                        "学習した歩幅  ゆっくり ${String.format("%.2f", loadout?.strideLow ?: 0.62)}m" +
+                                " / ふつう ${String.format("%.2f", loadout?.strideMid ?: 0.70)}m" +
+                                " / 速い ${String.format("%.2f", loadout?.strideHigh ?: 0.78)}m",
+                        fontSize = 12.sp
                     )
                     Text(
                         "修理ポイント残高 ${loadout?.repairWallet ?: 0}",
