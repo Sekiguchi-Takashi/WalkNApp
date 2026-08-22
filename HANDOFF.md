@@ -1,6 +1,17 @@
 # HANDOFF — WalkNApp
 
 ## 現在地
+- v2.2: 記録（統計）画面を追加
+  - StatsScreen.kt を新設。地図画面の「記録」ボタンから開く
+  - 本日の有効時間（60分目標に対する進捗バー）と獲得ポイント（上限に対する進捗バー）
+  - 連続日数と上限ボーナス、達成までの残り時間
+  - 直近14日の有効時間を Canvas の棒グラフで表示。達成日は緑、未達は灰。60分の位置に基準線
+  - ランク別の獲得数と累計ポイント
+  - 靴ごとの耐久と累計有効時間
+  - 累計（有効時間・距離・セッション数・学習した歩幅・修理ポイント残高）
+  - DAOに observeRankStats / observeRecentQuotas / observeTotalValidSec / observeTotalDistance / observeSessionCount を追加（スキーマ変更なし・Room version 5 のまま）
+
+
 - v2.1: フォアグラウンドサービス化＋歩幅学習
   - service/WalkService.kt を追加。画面を消しても記録が続く。通知に速度・有効時間・連続時間を表示し、獲得時は別通知
   - 位置取得を osmdroid のオーバーレイから FusedLocationProvider に変更（3秒 / 3m 間隔）
@@ -26,10 +37,9 @@
   - 画面: ウォーク（地図＋軌跡＋状態パネル）/ 装備 / 持ち物 / 履歴
 
 ## 未実装（次バージョン以降）
-- 図鑑・統計画面
-- StrideProfile の永続化（現状は毎回 0.70m 固定。WalkEngine.learnedStride() は用意済み）
-- フォアグラウンドサービス化（画面を消すと記録が止まる）
-- Phase 2（ウォレット・cNFTミント・QR交換・マーケット）
+- 靴の追加入手（現状は初期3足のみ。Phase 2 でミント/購入を想定）
+- ケイデンス帯ごとの歩幅プロファイル（現状は単一の平均値）
+- Phase 2（ウォレット・cNFTミント・QR交換・マーケット・AI提案）
 
 - v1.3: 納品規約への準拠
   - build.yml を削除。CI は release.yml（タグ起動）のみに一本化

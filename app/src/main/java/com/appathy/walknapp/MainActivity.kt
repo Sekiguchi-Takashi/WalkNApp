@@ -155,16 +155,23 @@ fun RootScreen() {
         "equip" -> EquipScreen { screen = "walk" }
         "bag" -> BagScreen { screen = "walk" }
         "history" -> HistoryScreen { screen = "walk" }
+        "stats" -> StatsScreen { screen = "walk" }
         else -> WalkScreen(
             onEquip = { screen = "equip" },
             onBag = { screen = "bag" },
-            onHistory = { screen = "history" }
+            onHistory = { screen = "history" },
+            onStats = { screen = "stats" }
         )
     }
 }
 
 @Composable
-fun WalkScreen(onEquip: () -> Unit, onBag: () -> Unit, onHistory: () -> Unit) {
+fun WalkScreen(
+    onEquip: () -> Unit,
+    onBag: () -> Unit,
+    onHistory: () -> Unit,
+    onStats: () -> Unit
+) {
     val context = LocalContext.current
     val db = remember { WalkDatabase.get(context) }
 
@@ -279,6 +286,7 @@ fun WalkScreen(onEquip: () -> Unit, onBag: () -> Unit, onHistory: () -> Unit) {
                 OutlinedButton(onClick = onEquip) { Text("装備") }
                 OutlinedButton(onClick = onBag, modifier = Modifier.padding(start = 6.dp)) { Text("持ち物") }
                 OutlinedButton(onClick = onHistory, modifier = Modifier.padding(start = 6.dp)) { Text("履歴") }
+                OutlinedButton(onClick = onStats, modifier = Modifier.padding(start = 6.dp)) { Text("記録") }
             }
         }
     }

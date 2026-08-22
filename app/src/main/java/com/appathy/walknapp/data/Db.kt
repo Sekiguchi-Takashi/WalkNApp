@@ -87,6 +87,12 @@ data class AssetEventEntity(
     @ColumnInfo(name = "detail") val detail: String? = null
 )
 
+data class RankStat(
+    @ColumnInfo(name = "rank") val rank: String,
+    @ColumnInfo(name = "cnt") val count: Int,
+    @ColumnInfo(name = "pts") val points: Int
+)
+
 @Dao
 interface WalkDao {
 
@@ -161,6 +167,21 @@ interface WalkDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEvent(event: AssetEventEntity)
+
+    @Query("SELECT rank, COUNT(*) AS cnt, SUM(repair_point) AS pts FROM asset GROUP BY rank")
+    fun observeRankStats(): Flow<List<RankStat>>
+
+    @Query("SELECT * FROM daily_quota ORDER BY date DESC LIMIT 14")
+    fun observeRecentQuotas(): Flow<List<DailyQuotaEntity>>
+
+    @Query("SELECT IFNULL(SUM(valid_sec),0) FROM walk_session")
+    fun observeTotalValidSec(): Flow<Long>
+
+    @Query("SELECT IFNULL(SUM(distance_m),0) FROM walk_session")
+    fun observeTotalDistance(): Flow<Double>
+
+    @Query("SELECT COUNT(*) FROM walk_session WHERE end_at IS NOT NULL")
+    fun observeSessionCount(): Flow<Int>
 }
 
 @Database(
